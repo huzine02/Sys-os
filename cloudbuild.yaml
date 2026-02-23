@@ -1,0 +1,35 @@
+steps:
+  # Construction de l'image avec injection de la clé API
+  - name: 'gcr.io/cloud-builders/docker'
+    args: [
+      'build', 
+      '-t', 'gcr.io/$PROJECT_ID/sys-allocator:$COMMIT_SHA',
+      '--build-arg', 'VITE_API_KEY=$_VITE_API_KEY',
+      '.'
+    ]
+  
+  # Push de l'image
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'gcr.io/$PROJECT_ID/sys-allocator:$COMMIT_SHA']
+  
+  # Déploiement sur Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'deploy'
+      - 'sys-allocator-v7'
+      - '--image'
+      - 'gcr.io/$PROJECT_ID/sys-allocator:$COMMIT_SHA'
+      - '--region'
+      - 'europe-west1'
+      - '--platform'
+      - 'managed'
+      - '--allow-unauthenticated'
+
+# Variables de substitution (à configurer dans le Trigger Google Cloud)
+substitutions:
+  _VITE_API_KEY: "votre_cle_ici_si_test_local"
+
+images:
+  - 'gcr.io/$PROJECT_ID/sys-allocator:$COMMIT_SHA'

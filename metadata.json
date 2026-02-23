@@ -1,0 +1,10 @@
+{
+  "name": "Copy of Copy of SysDiag V7 ok ",
+  "short_name": "SysDiag",
+  "description": "System Diagnostics and Resource Allocation Tool. Internal Use Only.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#0076CE",
+  "requestFramePermissions": []
+}
