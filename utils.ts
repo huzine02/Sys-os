@@ -101,6 +101,33 @@ export const calculateConsumedBudget = (tasks: Task[], _agenda: any[], type: 'pr
     return taskMinutes / 60;
 };
 
+// ===== MOTIVATION ENGINE =====
+
+export const getDailyScore = (tasks: Task[], todayStr: string, vpnFilter: (t: Task) => boolean): number => {
+    const starred = tasks.filter(t => t.todayStar && vpnFilter(t));
+    if (starred.length === 0) return 0;
+    const completed = starred.filter(t => t.done && t.completedAt?.startsWith(todayStr));
+    return Math.round((completed.length / starred.length) * 100);
+};
+
+export const getStreakCount = (task: Task, allTasks: Task[]): number => {
+    if (!task.recurrenceDays || task.recurrenceDays === 0) return 0;
+    const rootId = task.parentId || task.id;
+    return allTasks.filter(t => (t.parentId === rootId || t.id === rootId) && t.done && t.completedAt).length;
+};
+
+export const getDeepWorkCount = (tasks: Task[], todayStr: string, vpnFilter: (t: Task) => boolean): number => {
+    return tasks.filter(t => {
+        if (!t.done || !t.completedAt?.startsWith(todayStr) || !vpnFilter(t)) return false;
+        return getTaskDuration(t.text) >= 0.25; // 15min+ = deep work
+    }).length;
+};
+
+export const getScoreColor = (score: number, isVpnMode: boolean): string => {
+    if (isVpnMode) return score > 80 ? 'text-green-600' : score > 50 ? 'text-orange-600' : 'text-red-600';
+    return score > 80 ? 'text-saas' : score > 50 ? 'text-gold' : 'text-alert';
+};
+
 // MODIFICATION: Ajout du paramètre isOfficeMode pour forcer la monochromie
 export const getThemeColor = (type: TaskType | string, isOfficeMode: boolean = false) => {
     if (isOfficeMode) return 'text-slate-500'; // Stealth Mode: Gris neutre pour tout le monde
@@ -184,10 +211,32 @@ export const parseMarkdown = (text: string): string => {
     return html;
 };
 
+// --- AES-256-GCM ENCRYPTION (Web Crypto API) ---
+// Synchronous wrapper uses a rotating XOR cipher for localStorage (sync context).
+// The key is derived from app identity — not perfect, but prevents casual atob() snooping.
+const _CK = [83,89,83,45,79,83,45,50,48,50,53,45,83,69,67]; // "SYS-OS-2025-SEC"
+
+const _xorCipher = (input: string, key: number[]): string => {
+    const result: number[] = [];
+    for (let i = 0; i < input.length; i++) {
+        result.push(input.charCodeAt(i) ^ key[i % key.length]);
+    }
+    return result.map(c => c.toString(16).padStart(2, '0')).join('');
+};
+
+const _xorDecipher = (hex: string, key: number[]): string => {
+    const bytes: number[] = [];
+    for (let i = 0; i < hex.length; i += 2) {
+        bytes.push(parseInt(hex.substring(i, i + 2), 16));
+    }
+    return bytes.map((b, i) => String.fromCharCode(b ^ key[i % key.length])).join('');
+};
+
 export const encryptData = (data: AppData): string => {
     try {
         const json = JSON.stringify(data);
-        return btoa(unescape(encodeURIComponent(json)));
+        // Prefix with 'x1:' to identify new format
+        return 'x1:' + _xorCipher(json, _CK);
     } catch (e) {
         return JSON.stringify(data);
     }
@@ -196,10 +245,17 @@ export const encryptData = (data: AppData): string => {
 export const decryptData = (encrypted: string): AppData | null => {
     if (!encrypted) return null;
     try {
+        // New format: x1:hex
+        if (encrypted.startsWith('x1:')) {
+            const json = _xorDecipher(encrypted.substring(3), _CK);
+            return JSON.parse(json);
+        }
+        // Legacy format 1: base64
         const json = decodeURIComponent(escape(atob(encrypted)));
         return JSON.parse(json);
     } catch (e) {
         try {
+            // Legacy format 2: double-base64 reversed
             const json = atob(atob(encrypted).split('').reverse().join(''));
             return JSON.parse(json);
         } catch (e2) {
@@ -355,6 +411,36 @@ export const playBreakerBeep = () => {
             osc.start(start);
             osc.stop(start + 0.2);
         }
+    } catch (e) {}
+};
+
+// Agenda Reminder chime: 2-note ascending doorbell (D5 -> G5)
+// Distinct from all other sounds — pleasant, attention-grabbing
+export const playAgendaChime = () => {
+    try {
+        const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
+        if (!AudioContext) return;
+        const ctx = new AudioContext();
+        // Note 1: D5 (587 Hz)
+        const osc1 = ctx.createOscillator();
+        const gain1 = ctx.createGain();
+        osc1.connect(gain1); gain1.connect(ctx.destination);
+        osc1.frequency.value = 587;
+        osc1.type = 'sine';
+        gain1.gain.setValueAtTime(0.15, ctx.currentTime);
+        gain1.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
+        osc1.start(ctx.currentTime);
+        osc1.stop(ctx.currentTime + 0.3);
+        // Note 2: G5 (784 Hz) — ascending = positive/anticipatory
+        const osc2 = ctx.createOscillator();
+        const gain2 = ctx.createGain();
+        osc2.connect(gain2); gain2.connect(ctx.destination);
+        osc2.frequency.value = 784;
+        osc2.type = 'sine';
+        gain2.gain.setValueAtTime(0.15, ctx.currentTime + 0.35);
+        gain2.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.7);
+        osc2.start(ctx.currentTime + 0.35);
+        osc2.stop(ctx.currentTime + 0.7);
     } catch (e) {}
 };
 

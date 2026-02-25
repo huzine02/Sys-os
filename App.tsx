@@ -12,7 +12,9 @@ import {
     calculateConsumedBudget, ASSETS_KEYS,
     saveSnapshot, getBackups,
     requestNotificationPermission, sendSystemNotification,
-    playEyeCareBeep, playBreakerBeep, playTaskTimerBeep, playAdhanBeep
+    playEyeCareBeep, playBreakerBeep, playTaskTimerBeep, playAdhanBeep,
+    playAgendaChime,
+    getDailyScore, getDeepWorkCount, getScoreColor
 } from './utils';
 import { Button, Input, Card } from './components/UI';
 import { Icons } from './components/Icons';
@@ -22,15 +24,29 @@ import CommandCenter from './components/CommandCenter';
 
 export type ExtendedViewType = ViewType | 'journal' | 'agenda';
 
+// --- RECURRENCE OPTIONS ---
+const RECURRENCE_OPTIONS = [
+    { label: '—', labelVpn: '—', days: 0 },
+    { label: '1j', labelVpn: '1d', days: 1 },
+    { label: '2j', labelVpn: '2d', days: 2 },
+    { label: '1 sem', labelVpn: '1w', days: 7 },
+    { label: '2 sem', labelVpn: '2w', days: 14 },
+    { label: '3 sem', labelVpn: '3w', days: 21 },
+    { label: '1 mois', labelVpn: '1mo', days: 30 },
+    { label: '5 sem', labelVpn: '5w', days: 35 },
+];
+
 // --- NEW TASK MODAL ---
-const NewTaskModal = ({ active, onClose, onAdd, defaultType, isOfficeMode, settings }: { active: boolean, onClose: () => void, onAdd: (t: TaskType, txt: string) => void, defaultType?: TaskType, isOfficeMode: boolean, settings: Settings }) => {
+const NewTaskModal = ({ active, onClose, onAdd, defaultType, isOfficeMode, vpnMode, vpnColumn, vpnCols, onAddVpn }: { active: boolean, onClose: () => void, onAdd: (t: TaskType, txt: string, rec?: number) => void, defaultType?: TaskType, isOfficeMode: boolean, settings?: Settings, vpnMode?: boolean, vpnColumn?: 1|2|3|4, vpnCols?: {col1:string;col2:string;col3:string;col4:string}, onAddVpn?: (col: 1|2|3|4, txt: string, rec?: number) => void }) => {
     const [text, setText] = useState("");
     const [type, setType] = useState<TaskType>(defaultType || 'pro');
     const [duration, setDuration] = useState<number | null>(null);
+    const [selCol, setSelCol] = useState<1|2|3|4>(vpnColumn || 1);
+    const [recDays, setRecDays] = useState(0);
 
     useEffect(() => {
-        if(active) { setText(""); setDuration(null); if(defaultType) setType(defaultType); }
-    }, [active, defaultType]);
+        if(active) { setText(""); setDuration(null); setRecDays(0); if(defaultType) setType(defaultType); if(vpnColumn) setSelCol(vpnColumn); }
+    }, [active, defaultType, vpnColumn]);
 
     if (!active) return null;
 
@@ -41,17 +57,26 @@ const NewTaskModal = ({ active, onClose, onAdd, defaultType, isOfficeMode, setti
                 <div className="space-y-4">
                     <div>
                         <label className={`text-xs uppercase mb-1 block ${isOfficeMode ? 'text-gray-500' : 'text-slate-500'}`}>{isOfficeMode ? 'Subject' : 'Titre'}</label>
-                        <Input autoFocus value={text} onChange={e => setText(e.target.value)} placeholder={isOfficeMode ? 'Ex: Review config...' : 'Ex: Réviser devis...'} />
+                        <Input autoFocus value={text} onChange={e => setText(e.target.value)} placeholder={isOfficeMode ? 'Ex: Review config...' : 'Ex: Appeler cheffe de projet...'} />
                     </div>
                     <div>
-                        <label className={`text-xs uppercase mb-1 block ${isOfficeMode ? 'text-gray-500' : 'text-slate-500'}`}>{isOfficeMode ? 'Category' : 'Catégorie'}</label>
-                        <select className={`w-full border rounded-lg px-3 py-2.5 text-sm focus:outline-none ${isOfficeMode ? 'bg-gray-50 border-gray-200 text-gray-800' : 'bg-bg-surface border-white/[0.08] text-slate-200'}`} value={type} onChange={(e) => setType(e.target.value as TaskType)}>
-                            <option value="pro">{sanitizeForOffice("pro", isOfficeMode, settings)}</option>
-                            <option value="saas">{sanitizeForOffice("saas", isOfficeMode, settings)}</option>
-                            <option value="patri">{sanitizeForOffice("patri", isOfficeMode, settings)}</option>
-                            {ASSETS_KEYS.map((key) => (<option key={key} value={key}>  {sanitizeForOffice(key, isOfficeMode, settings)}</option>))}
-                            <option value="vie">{sanitizeForOffice("vie", isOfficeMode, settings)}</option>
-                        </select>
+                        <label className={`text-xs uppercase mb-1 block ${isOfficeMode ? 'text-gray-500' : 'text-slate-500'}`}>{vpnMode ? 'Column' : isOfficeMode ? 'Category' : 'Catégorie'}</label>
+                        {vpnMode && vpnCols ? (
+                            <select className="w-full border rounded-lg px-3 py-2.5 text-sm focus:outline-none bg-gray-50 border-gray-200 text-gray-800" value={selCol} onChange={(e) => setSelCol(parseInt(e.target.value) as 1|2|3|4)}>
+                                <option value={1}>{vpnCols.col1}</option>
+                                <option value={2}>{vpnCols.col2}</option>
+                                <option value={3}>{vpnCols.col3}</option>
+                                <option value={4}>{vpnCols.col4}</option>
+                            </select>
+                        ) : (
+                            <select className={`w-full border rounded-lg px-3 py-2.5 text-sm focus:outline-none ${isOfficeMode ? 'bg-gray-50 border-gray-200 text-gray-800' : 'bg-bg-surface border-white/[0.08] text-slate-200'}`} value={type} onChange={(e) => setType(e.target.value as TaskType)}>
+                                <option value="pro">pro</option>
+                                <option value="saas">saas</option>
+                                <option value="patri">patri</option>
+                                {ASSETS_KEYS.map((key) => (<option key={key} value={key}>  {key}</option>))}
+                                <option value="vie">vie</option>
+                            </select>
+                        )}
                     </div>
                     <div>
                         <label className={`text-xs uppercase mb-2 block ${isOfficeMode ? 'text-gray-500' : 'text-slate-500'}`}>{isOfficeMode ? 'Est. Time (Min)' : 'Durée (Min)'}</label>
@@ -61,9 +86,18 @@ const NewTaskModal = ({ active, onClose, onAdd, defaultType, isOfficeMode, setti
                             ))}
                         </div>
                     </div>
+                    <div>
+                        <label className={`text-xs uppercase mb-2 block ${isOfficeMode ? 'text-gray-500' : 'text-slate-500'}`}>{isOfficeMode ? 'Recurrence' : 'Relance / Récurrence'}</label>
+                        <div className="grid grid-cols-4 gap-2">
+                            {RECURRENCE_OPTIONS.map(opt => (
+                                <button key={opt.days} onClick={() => setRecDays(opt.days)} className={`py-2 rounded border text-xs font-bold transition-all ${recDays === opt.days ? (opt.days === 0 ? 'bg-white/20 border-white/30 text-white' : 'bg-amber-600 border-amber-500 text-white') : isOfficeMode ? 'bg-gray-50 border-gray-200 text-gray-600' : 'bg-white/5 border-white/10 text-slate-400 hover:bg-white/10'}`}>{vpnMode ? opt.labelVpn : opt.label}</button>
+                            ))}
+                        </div>
+                        {recDays > 0 && <p className={`text-xs mt-1.5 ${isOfficeMode ? 'text-amber-600' : 'text-amber-400'}`}>{isOfficeMode ? `↻ Recreated every ${recDays} days when completed` : `↻ Se recrée tous les ${recDays}j quand cochée`}</p>}
+                    </div>
                     <div className="pt-2 flex gap-3">
                         <Button className={`flex-1 ${isOfficeMode ? 'bg-gray-100 text-gray-600' : 'bg-white/5'}`} onClick={onClose}>{isOfficeMode ? 'Cancel' : 'Annuler'}</Button>
-                        <Button className={`flex-1 ${!text || !duration ? 'opacity-50 cursor-not-allowed' : 'bg-pro text-white'}`} disabled={!text || !duration} onClick={() => { if (text && duration) { onAdd(type, `${text} (${duration})`); onClose(); } }}>{isOfficeMode ? 'Submit' : 'Valider'}</Button>
+                        <Button className={`flex-1 ${!text || !duration ? 'opacity-50 cursor-not-allowed' : 'bg-pro text-white'}`} disabled={!text || !duration} onClick={() => { if (text && duration) { const rec = recDays > 0 ? recDays : undefined; if (vpnMode && onAddVpn) { onAddVpn(selCol, `${text} (${duration})`, rec); } else { onAdd(type, `${text} (${duration})`, rec); } onClose(); } }}>{isOfficeMode ? 'Submit' : 'Valider'}</Button>
                     </div>
                 </div>
             </div>
@@ -118,6 +152,20 @@ const LoginScreen = ({ onLogin, onLog }: { onLogin: (t: string, i: string) => vo
 // ============================================
 // MAIN APP
 // ============================================
+// --- TOKEN VAULT: separate storage for auth tokens (survives data corruption) ---
+const _saveTokenVault = (token: string, id: string) => {
+    if (token && id) {
+        try { localStorage.setItem('_sys_tv', JSON.stringify({ t: token, i: id })); } catch(e) {}
+    }
+};
+const _loadTokenVault = (): { t: string; i: string } | null => {
+    try {
+        const raw = localStorage.getItem('_sys_tv');
+        if (raw) { const v = JSON.parse(raw); if (v.t && v.i) return v; }
+    } catch(e) {}
+    return null;
+};
+
 export default function App() {
     const [data, setData] = useState<AppData>(() => {
         try {
@@ -131,11 +179,22 @@ export default function App() {
                     localStorage.removeItem('huzine_os_secure');
                 }
             }
+            // Load token vault as safety net
+            const vault = _loadTokenVault();
             if (savedData) {
                 const parsed = decryptData(savedData);
                 if (parsed && parsed.settings) {
-                    return { ...INITIAL_DATA, ...parsed, settings: { ...parsed.settings, gistToken: parsed.settings.gistToken || INITIAL_DATA.settings.gistToken, gistId: parsed.settings.gistId || INITIAL_DATA.settings.gistId }, weeklyConfig: parsed.weeklyConfig || DAY_CONFIGS };
+                    // CRITICAL: tokens recovery chain: parsed > vault > empty
+                    // This survives data corruption, format migration, and process.env removal
+                    const token = parsed.settings.gistToken || vault?.t || '';
+                    const id = parsed.settings.gistId || vault?.i || '';
+                    if (token && id) _saveTokenVault(token, id);
+                    return { ...INITIAL_DATA, ...parsed, settings: { ...parsed.settings, gistToken: token, gistId: id }, weeklyConfig: parsed.weeklyConfig || DAY_CONFIGS };
                 }
+            }
+            // Even if main data is gone, vault can restore connection
+            if (vault) {
+                return { ...INITIAL_DATA, settings: { ...INITIAL_DATA.settings, gistToken: vault.t, gistId: vault.i } };
             }
         } catch (e) { console.error("[INIT] Error", e); }
         return INITIAL_DATA;
@@ -151,6 +210,7 @@ export default function App() {
     const [backupsList, setBackupsList] = useState<Backup[]>([]);
     const [showTaskModal, setShowTaskModal] = useState(false);
     const [modalDefaultType, setModalDefaultType] = useState<TaskType>('pro');
+    const [vpnModalColumn, setVpnModalColumn] = useState<1|2|3|4>(1);
     const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'success' | 'error' | 'pending'>('idle');
     const syncTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const [debugLogs, setDebugLogs] = useState<string[]>([]);
@@ -185,6 +245,8 @@ export default function App() {
     const timerAlertFiredRef = useRef(false);
     // Adhan alerts tracking (set of "prayerName-HH:MM" already fired)
     const adhanFiredRef = useRef<Set<string>>(new Set());
+    // Agenda reminder tracking (set of "eventId-type" already fired)
+    const agendaFiredRef = useRef<Set<string>>(new Set());
 
     const todayStr = new Date().toISOString().split('T')[0];
     const [newAgendaTitle, setNewAgendaTitle] = useState("");
@@ -204,8 +266,11 @@ export default function App() {
     const vpnAppName = data.settings.vpnAppName || 'Planner';
     const userName = data.settings.userName || 'Operator';
     useEffect(() => { document.title = isVpnMode ? vpnAppName : "SYS-OS // Main"; }, [isVpnMode, vpnAppName]);
+    // Keep token vault in sync whenever tokens change
+    useEffect(() => { _saveTokenVault(data.settings.gistToken, data.settings.gistId); }, [data.settings.gistToken, data.settings.gistId]);
 
     const visibleCategories = ['pro', 'saas', 'patri', 'vie'];
+    const vpnCols = data.settings.vpnColumns || { col1: 'Clients', col2: 'Formation', col3: 'Admin', col4: 'Meetings' };
     const appBg = isVpnMode ? 'bg-gray-50 text-gray-900' : 'bg-[#050507] text-slate-200 selection:bg-pro selection:text-white';
     const headerBg = isVpnMode ? 'bg-white border-b border-gray-200' : 'bg-bg-deep/80 backdrop-blur-md border-b border-white/[0.06]';
     const mutedText = isVpnMode ? 'text-gray-500' : 'text-slate-500';
@@ -222,7 +287,33 @@ export default function App() {
         });
     }, [SESSION_ID]);
 
-    const toggleTaskSafe = (id: number) => setSafeData(prev => ({ ...prev, tasks: prev.tasks.map(t => t.id !== id ? t : { ...t, done: !t.done, completedAt: !t.done ? new Date().toISOString() : undefined }) }));
+    const toggleTaskSafe = (id: number) => setSafeData(prev => {
+        const task = prev.tasks.find(t => t.id === id);
+        if (!task) return prev;
+        const nowDone = !task.done;
+        let updatedTasks = prev.tasks.map(t => t.id !== id ? t : { ...t, done: nowDone, completedAt: nowDone ? new Date().toISOString() : undefined });
+        // RÉCURRENCE : Si on coche done ET que la tâche a une récurrence → créer la prochaine
+        if (nowDone && task.recurrenceDays && task.recurrenceDays > 0) {
+            const baseDate = task.nextDate ? new Date(task.nextDate + 'T00:00:00') : new Date();
+            baseDate.setDate(baseDate.getDate() + task.recurrenceDays);
+            const nextDateStr = baseDate.toISOString().split('T')[0];
+            const newTask: Task = {
+                id: Date.now() + Math.random(),
+                type: task.type,
+                text: task.text,
+                done: false,
+                priority: task.priority,
+                todayStar: false,
+                createdAt: new Date().toISOString(),
+                vpnColumn: task.vpnColumn,
+                recurrenceDays: task.recurrenceDays,
+                nextDate: nextDateStr,
+                parentId: task.parentId || task.id,
+            };
+            updatedTasks = [newTask, ...updatedTasks];
+        }
+        return { ...prev, tasks: updatedTasks };
+    });
     const updateTaskSafe = (id: number, updates: Partial<Task>) => setSafeData(prev => ({...prev, tasks: prev.tasks.map(t => t.id === id ? { ...t, ...updates } : t)}));
     const deleteTaskSafe = (id: number) => setSafeData(prev => ({...prev, tasks: prev.tasks.filter(t => t.id !== id)}));
     const toggleTodayStar = (id: number) => { const t = data.tasks.find(tk => tk.id === id); if (t) updateTaskSafe(id, { todayStar: !t.todayStar }); };
@@ -245,7 +336,7 @@ export default function App() {
 
     const radarEvents = (() => {
         const today = new Date(); today.setHours(0,0,0,0);
-        return (data.agenda || []).filter(e => { const d = new Date(e.date); d.setHours(0,0,0,0); const diff = Math.ceil((d.getTime() - today.getTime()) / 86400000); return diff >= 0 && diff <= 7; }).sort((a,b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+        return (data.agenda || []).filter(e => { if (isVpnMode && !e.vpnCreated) return false; const d = new Date(e.date); d.setHours(0,0,0,0); const diff = Math.ceil((d.getTime() - today.getTime()) / 86400000); return diff >= 0 && diff <= 7; }).sort((a,b) => new Date(a.date).getTime() - new Date(b.date).getTime());
     })();
 
     // ============ SYNC ENGINE V9 ============
@@ -281,9 +372,15 @@ export default function App() {
         } catch (e: any) { log("[PULL] Err: " + e.message); }
     }, [SESSION_ID]);
 
-    const addNewTask = (type: TaskType, text: string) => {
+    const addNewTask = (type: TaskType, text: string, recDays?: number) => {
         if (!text) return;
-        setSafeData(p => ({ ...p, tasks: [{ id: Date.now(), type, text, done: false, priority: 'M', todayStar: false, createdAt: new Date().toISOString() }, ...p.tasks] }));
+        const todayStr2 = new Date().toISOString().split('T')[0];
+        setSafeData(p => ({ ...p, tasks: [{ id: Date.now(), type, text, done: false, priority: 'M', todayStar: false, createdAt: new Date().toISOString(), ...(recDays ? { recurrenceDays: recDays, nextDate: todayStr2 } : {}) }, ...p.tasks] }));
+    };
+    const addVpnTask = (col: 1|2|3|4, text: string, recDays?: number) => {
+        if (!text) return;
+        const todayStr2 = new Date().toISOString().split('T')[0];
+        setSafeData(p => ({ ...p, tasks: [{ id: Date.now(), type: 'pro' as TaskType, text, done: false, priority: 'M', todayStar: false, createdAt: new Date().toISOString(), vpnColumn: col, ...(recDays ? { recurrenceDays: recDays, nextDate: todayStr2 } : {}) }, ...p.tasks] }));
     };
 
     // --- INIT ---
@@ -301,7 +398,7 @@ export default function App() {
             // N = New task (only when not typing in an input)
             const ae = document.activeElement;
             const isTyping = ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.tagName === 'SELECT');
-            if (e.key === 'n' && !e.ctrlKey && !e.metaKey && !e.altKey && !isTyping) { setShowTaskModal(true); }
+            if (e.key === 'n' && !e.ctrlKey && !e.metaKey && !e.altKey && !isTyping) { setVpnModalColumn(1); setShowTaskModal(true); }
         };
         window.addEventListener('keydown', hk);
         return () => window.removeEventListener('keydown', hk);
@@ -362,6 +459,7 @@ export default function App() {
     const timerRunningRef = useRef(timerRunning);
     const timerTaskRef = useRef(timerTask);
     const prayerTimesRef = useRef(prayerTimes);
+    const agendaRef = useRef(data.agenda || []);
 
     // Keep refs in sync
     useEffect(() => { eyeCareEnabledRef.current = data.settings.eyeCare; }, [data.settings.eyeCare]);
@@ -377,6 +475,7 @@ export default function App() {
     useEffect(() => { timerRunningRef.current = timerRunning; }, [timerRunning]);
     useEffect(() => { timerTaskRef.current = timerTask; }, [timerTask]);
     useEffect(() => { prayerTimesRef.current = prayerTimes; }, [prayerTimes]);
+    useEffect(() => { agendaRef.current = data.agenda || []; }, [data.agenda]);
 
     useEffect(() => {
         // Create Web Worker ONCE for reliable 1s ticks even in background
@@ -474,6 +573,83 @@ export default function App() {
                 }
             }
 
+            // ========== AGENDA REMINDERS (J-2, J-1, 30min, NOW) ==========
+            {
+                const agenda = agendaRef.current;
+                const isVpn = isVpnModeRef.current;
+                const nowDateStr = now.toISOString().split('T')[0];
+                const nowMins = now.getHours() * 60 + now.getMinutes();
+                const eventsToCheck = isVpn ? agenda.filter((e: AgendaEvent) => e.vpnCreated) : agenda;
+
+                for (const evt of eventsToCheck) {
+                    const evtDate = new Date(evt.date + 'T00:00:00');
+                    const todayDate = new Date(nowDateStr + 'T00:00:00');
+                    const diffDays = Math.round((evtDate.getTime() - todayDate.getTime()) / 86400000);
+                    const [eh, em] = evt.time.split(':').map(Number);
+                    const evtMins = eh * 60 + em;
+                    const title = isVpn ? 'Appointment' : evt.title;
+                    const weekday = evtDate.toLocaleDateString(isVpn ? 'en-US' : 'fr-FR', { weekday: 'short' });
+
+                    // J-2: 2 days before at 20h00
+                    const keyJ2 = `${evt.id}-j2`;
+                    if (diffDays === 2 && nowMins === 1200 && now.getSeconds() < 2 && !agendaFiredRef.current.has(keyJ2)) {
+                        agendaFiredRef.current.add(keyJ2);
+                        playAgendaChime();
+                        sendSystemNotification(
+                            isVpn ? 'Upcoming Appointment' : 'RDV dans 2 jours',
+                            isVpn ? `Appointment on ${weekday} at ${evt.time}` : `${title} (${weekday} ${evt.time})`
+                        );
+                    }
+                    // J-1 (veille): day before at 20h00
+                    const keyJ1 = `${evt.id}-j1`;
+                    if (diffDays === 1 && nowMins === 1200 && now.getSeconds() < 2 && !agendaFiredRef.current.has(keyJ1)) {
+                        agendaFiredRef.current.add(keyJ1);
+                        playAgendaChime(); playAgendaChime();
+                        sendSystemNotification(
+                            isVpn ? 'Appointment TOMORROW' : `${title} — DEMAIN`,
+                            isVpn ? `Tomorrow at ${evt.time}` : `Demain a ${evt.time}`
+                        );
+                    }
+                    // 30 min before (day-of)
+                    const key30 = `${evt.id}-30min`;
+                    if (diffDays === 0 && nowMins === evtMins - 30 && now.getSeconds() < 2 && !agendaFiredRef.current.has(key30)) {
+                        agendaFiredRef.current.add(key30);
+                        playAgendaChime();
+                        sendSystemNotification(
+                            isVpn ? 'In 30 minutes' : `${title} dans 30 min`,
+                            isVpn ? 'Appointment starting soon' : `Debut a ${evt.time}`
+                        );
+                    }
+                    // At exact time (day-of)
+                    const keyNow = `${evt.id}-now`;
+                    if (diffDays === 0 && nowMins === evtMins && now.getSeconds() < 2 && !agendaFiredRef.current.has(keyNow)) {
+                        agendaFiredRef.current.add(keyNow);
+                        playAgendaChime(); playAgendaChime();
+                        sendSystemNotification(
+                            isVpn ? 'NOW' : `${title} — MAINTENANT`,
+                            isVpn ? 'Appointment starting now' : `C'est l'heure !`
+                        );
+                    }
+                }
+                // Reset at midnight
+                if (now.getHours() === 0 && now.getMinutes() === 0 && now.getSeconds() < 2) {
+                    agendaFiredRef.current.clear();
+                }
+            }
+
+            // DAILY SCORE SAVE at midnight
+            if (now.getHours() === 0 && now.getMinutes() === 0 && now.getSeconds() < 2) {
+                const yesterday = new Date(now);
+                yesterday.setDate(yesterday.getDate() - 1);
+                const yStr = yesterday.toISOString().split('T')[0];
+                const yScore = getDailyScore(dataRef.current.tasks, yStr, (t: Task) => !isVpnModeRef.current || !!t.vpnColumn);
+                setSafeData(prev => {
+                    if (prev.dailyScores?.some(ds => ds.date === yStr)) return prev;
+                    const scores = [...(prev.dailyScores || []), { date: yStr, score: yScore }].slice(-7);
+                    return { ...prev, dailyScores: scores };
+                });
+            }
+
             // Focus Timer (background-immune via Worker)
             if (focusRunningRef.current && focusStartTimeRef.current > 0) {
                 const elapsed = Math.floor((Date.now() - focusStartTimeRef.current) / 1000);
@@ -485,11 +661,11 @@ export default function App() {
                     if (elapsed >= targetSec) {
                         focusAlertFiredRef.current = true;
                         playTaskTimerBeep();
-                        sendSystemNotification(isVpnModeRef.current ? "TIME'S UP" : "TEMPS ECOULE", isVpnModeRef.current ? `"${ft.text}" — estimated time reached` : `"${ft.text}" — duree estimee atteinte !`);
+                        sendSystemNotification(isVpnModeRef.current ? "TIME'S UP" : "TEMPS ECOULE", isVpnModeRef.current ? "Task timer completed." : `"${ft.text}" — duree estimee atteinte !`);
                     }
                     if (elapsed > targetSec && (elapsed - targetSec) % 600 === 0 && elapsed !== targetSec) {
                         playTaskTimerBeep();
-                        sendSystemNotification(isVpnModeRef.current ? "REMINDER" : "RAPPEL", isVpnModeRef.current ? `Overtime on "${ft.text}"` : `Tu depasses le temps sur "${ft.text}"`);
+                        sendSystemNotification(isVpnModeRef.current ? "REMINDER" : "RAPPEL", isVpnModeRef.current ? "Timer still running." : `Tu depasses le temps sur "${ft.text}"`);
                     }
                 }
             }
@@ -507,11 +683,11 @@ export default function App() {
                     if (elapsed >= targetSec) {
                         timerAlertFiredRef.current = true;
                         playTaskTimerBeep();
-                        sendSystemNotification(isVpnModeRef.current ? "TIME'S UP" : "TEMPS ECOULE", isVpnModeRef.current ? `"${tt.text}" — done!` : `"${tt.text}" — termine !`);
+                        sendSystemNotification(isVpnModeRef.current ? "TIME'S UP" : "TEMPS ECOULE", isVpnModeRef.current ? "Task completed." : `"${tt.text}" — termine !`);
                     }
                     if (elapsed > targetSec && (elapsed - targetSec) % 300 === 0 && elapsed !== targetSec) {
                         playTaskTimerBeep();
-                        sendSystemNotification(isVpnModeRef.current ? "OVERTIME" : "DEPASSEMENT", isVpnModeRef.current ? `Still running: "${tt.text}"` : `Encore en cours : "${tt.text}"`);
+                        sendSystemNotification(isVpnModeRef.current ? "OVERTIME" : "DEPASSEMENT", isVpnModeRef.current ? "Timer still running." : `Encore en cours : "${tt.text}"`);
                     }
                 }
             }
@@ -531,10 +707,14 @@ export default function App() {
     };
 
     // --- COMPUTED ---
-    const activeTasks = data.tasks.filter(t => !t.done);
-    const top3 = data.tasks.filter(t => !t.done && t.todayStar).sort((a) => (a.priority === 'H' ? -1 : 1)).slice(0, 3);
-    const todayCompleted = data.tasks.filter(t => t.done && t.completedAt?.startsWith(todayStr)).length;
-    const todayTotal = data.tasks.filter(t => t.todayStar).length;
+    const vpnFilter = (t: Task) => !isVpnMode || (t.type === 'pro' && !!t.vpnColumn);
+    const activeTasks = data.tasks.filter(t => !t.done && vpnFilter(t));
+    const top3 = data.tasks.filter(t => !t.done && t.todayStar && vpnFilter(t)).sort((a) => (a.priority === 'H' ? -1 : 1)).slice(0, 3);
+    const todayCompleted = data.tasks.filter(t => t.done && t.completedAt?.startsWith(todayStr) && vpnFilter(t)).length;
+    const todayTotal = data.tasks.filter(t => t.todayStar && vpnFilter(t)).length;
+    const dailyScore = getDailyScore(data.tasks, todayStr, vpnFilter);
+    const deepWorkCount = getDeepWorkCount(data.tasks, todayStr, vpnFilter);
+    const ancreAlert = !isVpnMode && new Date().getHours() >= 12 && top3.length > 0 && !top3[0].done;
     const copyMobileLink = () => { navigator.clipboard.writeText(`${window.location.origin}${window.location.pathname}?token=${data.settings.gistToken}&id=${data.settings.gistId}`); alert("Lien copié !"); };
 
     // Focus timer controls
@@ -550,6 +730,8 @@ export default function App() {
     const stopInlineTimer = useCallback(() => {
         timerStartTimeRef.current = 0; timerAlertFiredRef.current = false; setTimerElapsed(0); setTimerRunning(false); setTimerTask(null);
     }, []);
+    // VPN safety: stop inline timer if running task is not pro
+    useEffect(() => { if (isVpnMode && timerTask && timerTask.type !== 'pro') { stopInlineTimer(); } }, [isVpnMode]); // eslint-disable-line
     const completeInlineTimer = useCallback(() => {
         if (timerTask) toggleTaskSafe(timerTask.id);
         stopInlineTimer();
@@ -558,6 +740,7 @@ export default function App() {
     // --- LOGIN GATE ---
     if (!data.settings.gistId || !data.settings.gistToken) {
         return <LoginScreen onLogin={(t, i) => {
+            _saveTokenVault(t, i); // Save tokens in separate vault FIRST
             const nd = { ...data, settings: { ...data.settings, gistToken: t, gistId: i }, updatedBy: SESSION_ID, lastSynced: Date.now() };
             try { localStorage.setItem('sys_diag_cache', encryptData(nd)); } catch(e) {}
             setData(nd); syncToGist(nd, t, i);
@@ -570,8 +753,8 @@ export default function App() {
     return (
         <div className={`flex flex-col h-screen transition-all duration-500 ${appBg} ${curfewActive ? 'grayscale-[0.8] brightness-50' : ''} ${data.settings.crisisMode ? 'border-[6px] border-alert' : ''} ${flashSync ? 'flash-sync' : ''}`}>
             <CorporateMask active={showCorporateMask} />
-            <NewTaskModal active={showTaskModal} onClose={() => setShowTaskModal(false)} onAdd={addNewTask} defaultType={modalDefaultType} isOfficeMode={isOfficeSanitization} settings={data.settings} />
-            <FocusOverlay active={!!focusTask} task={focusTask} elapsed={focusElapsed} isRunning={focusRunning} onStart={startFocusTimer} onPause={pauseFocusTimer} onResume={resumeFocusTimer} onClose={() => { resetFocusTimer(); setFocusTask(null); }} onComplete={() => { resetFocusTimer(); if(focusTask) toggleTaskSafe(focusTask.id); setFocusTask(null); }} onNext={() => { resetFocusTimer(); const idx = activeTasks.findIndex(t => t.id === focusTask?.id); if(idx !== -1 && idx < activeTasks.length - 1) setFocusTask(activeTasks[idx+1]); }} isOfficeMode={isOfficeSanitization} />
+            <NewTaskModal active={showTaskModal} onClose={() => setShowTaskModal(false)} onAdd={addNewTask} defaultType={modalDefaultType} isOfficeMode={isOfficeSanitization} settings={data.settings} vpnMode={isVpnMode} vpnColumn={vpnModalColumn} vpnCols={vpnCols} onAddVpn={addVpnTask} />
+            <FocusOverlay active={!!focusTask} task={focusTask} elapsed={focusElapsed} isRunning={focusRunning} onStart={startFocusTimer} onPause={pauseFocusTimer} onResume={resumeFocusTimer} onClose={() => { resetFocusTimer(); setFocusTask(null); }} onComplete={() => { resetFocusTimer(); if(focusTask) toggleTaskSafe(focusTask.id); setFocusTask(null); }} onNext={() => { resetFocusTimer(); const idx = activeTasks.findIndex(t => t.id === focusTask?.id); if(idx !== -1 && idx < activeTasks.length - 1) setFocusTask(activeTasks[idx+1]); }} isOfficeMode={isOfficeSanitization} settings={data.settings} />
             {curfewActive && (<div className="fixed inset-0 z-[100] border-t-8 border-red-900 mix-blend-overlay opacity-50 flex justify-center pt-2 pointer-events-none"><button onClick={() => setOverrideCurfew(true)} className="pointer-events-auto bg-red-900/90 text-red-100 px-6 py-1.5 rounded-full text-xs font-bold animate-pulse tracking-widest border border-red-500/30 hover:bg-red-700 cursor-pointer">FORCER</button></div>)}
             <EyeCareOverlay active={eyeBreakActive} timeLeft={breakCountdown} onSkip={() => { setEyeBreakActive(false); eyeBreakActiveRef.current = false; const t = Date.now(); setEyeCareStartTime(t); eyeCareStartTimeRef.current = t; }} isOfficeMode={isOfficeSanitization} />
             <CircuitBreakerOverlay active={showBreaker} onReset={() => { setShowBreaker(false); showBreakerRef.current = false; const t = Date.now(); setBreakerStartTime(t); breakerStartTimeRef.current = t; }} isOfficeMode={isOfficeSanitization} />
@@ -646,9 +829,11 @@ export default function App() {
                         { id: 'journal', icon: <Icons.Book size={16} />, label: 'Journal' },
                         { id: 'review', icon: <Icons.Calendar size={16} />, label: 'Plan' },
                         { id: 'pro', icon: <Icons.Briefcase size={16} />, label: 'pro' },
-                        { id: 'saas', icon: <Icons.Globe size={16} />, label: 'saas' },
-                        { id: 'vie', icon: <Icons.Heart size={16} />, label: 'vie' },
-                        { id: 'patri', icon: <Icons.Building size={16} />, label: 'patri' },
+                        ...(!isVpnMode ? [
+                            { id: 'saas', icon: <Icons.Globe size={16} />, label: 'saas' },
+                            { id: 'vie', icon: <Icons.Heart size={16} />, label: 'vie' },
+                            { id: 'patri', icon: <Icons.Building size={16} />, label: 'patri' },
+                        ] : []),
                     ].map(item => (
                         <button key={item.id} onClick={() => setCurrentView(item.id as ExtendedViewType)} className={`group w-10 h-10 md:w-11 md:h-11 rounded-lg flex flex-col items-center justify-center gap-0.5 transition-all relative ${currentView === item.id ? (isVpnMode ? 'bg-[#2563EB] text-white' : 'bg-white/[0.08] text-white') : (isVpnMode ? 'text-gray-400 hover:bg-gray-100' : 'text-slate-500 hover:text-slate-200 hover:bg-white/[0.03]')}`}>
                             {currentView === item.id && !isVpnMode && <div className="absolute left-0 top-1/2 -translate-y-1/2 h-3 w-[2px] bg-white rounded-r-full"></div>}
@@ -673,16 +858,16 @@ export default function App() {
                                         <h3 className={`font-bold text-xs mb-3 uppercase ${isVpnMode ? 'text-gray-500' : 'text-slate-400'}`}>{isVpnMode ? 'NEW EVENT' : 'NOUVEL ÉVÉNEMENT'}</h3>
                                         <div className="space-y-2">
                                             <Input type="date" value={newAgendaDate} onChange={e => setNewAgendaDate(e.target.value)} className="font-mono text-center text-xs" />
-                                            <Input type="time" value={newAgendaTime} onChange={e => setNewAgendaTime(e.target.value)} className="font-mono text-center text-xs" />
+                                            <Input type="text" inputMode="numeric" pattern="[0-2][0-9]:[0-5][0-9]" maxLength={5} value={newAgendaTime} onChange={e => { let v = e.target.value.replace(/[^0-9:]/g, ''); if (v.length === 2 && !v.includes(':')) v += ':'; setNewAgendaTime(v); }} placeholder="14:00" className="font-mono text-center text-xs" />
                                             <div className="flex gap-2"><Input type="number" placeholder="Min" value={newAgendaDuration} onChange={e => setNewAgendaDuration(e.target.value)} className="w-16 font-mono text-center text-xs" /><Input placeholder={isVpnMode ? 'Subject' : 'Titre'} value={newAgendaTitle} onChange={e => setNewAgendaTitle(e.target.value)} className="text-xs" /></div>
                                             <label className={`flex items-center gap-2 text-xs cursor-pointer ${isVpnMode ? 'text-gray-500' : 'text-slate-400'}`}><input type="checkbox" checked={newAgendaImportant} onChange={e => setNewAgendaImportant(e.target.checked)} />{isVpnMode ? 'Priority' : 'Important'}</label>
-                                            <Button variant="primary" className="w-full h-8 text-xs" onClick={() => { if(newAgendaTime && newAgendaTitle && newAgendaDate) { setSafeData(prev => ({ ...prev, agenda: [...(prev.agenda || []), { id: Date.now(), title: newAgendaTitle, time: newAgendaTime, date: newAgendaDate, type: 'work' as const, important: newAgendaImportant, duration: parseInt(newAgendaDuration) || 30 }].sort((a,b) => a.time.localeCompare(b.time)) })); setNewAgendaTitle(""); setNewAgendaTime(""); setNewAgendaImportant(false); } }}>{isVpnMode ? 'ADD' : 'AJOUTER'}</Button>
+                                            <Button variant="primary" className="w-full h-8 text-xs" onClick={() => { if(newAgendaTime && newAgendaTitle && newAgendaDate) { setSafeData(prev => ({ ...prev, agenda: [...(prev.agenda || []), { id: Date.now(), title: newAgendaTitle, time: newAgendaTime, date: newAgendaDate, type: 'work' as const, important: newAgendaImportant, duration: parseInt(newAgendaDuration) || 30, ...(isVpnMode ? { vpnCreated: true } : {}) }].sort((a,b) => a.time.localeCompare(b.time)) })); setNewAgendaTitle(""); setNewAgendaTime(""); setNewAgendaImportant(false); } }}>{isVpnMode ? 'ADD' : 'AJOUTER'}</Button>
                                         </div>
                                     </Card>
                                     <Card className="md:col-span-2 p-4 flex flex-col h-[480px]">
                                         <h3 className={`font-bold text-xs mb-3 uppercase ${isVpnMode ? 'text-gray-500' : 'text-slate-400'}`}>{isVpnMode ? 'SCHEDULE' : 'AGENDA'}</h3>
                                         <div className="flex-1 overflow-y-auto space-y-3 pr-1">
-                                            {Object.entries((data.agenda || []).sort((a,b) => new Date(a.date).getTime() - new Date(b.date).getTime()).reduce((acc, evt) => { if (!acc[evt.date]) acc[evt.date] = []; acc[evt.date].push(evt); return acc; }, {} as Record<string, AgendaEvent[]>)).map(([date, events]) => {
+                                            {Object.entries((data.agenda || []).filter(evt => !isVpnMode || evt.vpnCreated).sort((a,b) => new Date(a.date).getTime() - new Date(b.date).getTime()).reduce((acc, evt) => { if (!acc[evt.date]) acc[evt.date] = []; acc[evt.date].push(evt); return acc; }, {} as Record<string, AgendaEvent[]>)).map(([date, events]) => {
                                                 const isToday = date === todayStr;
                                                 return (<div key={date} className={`relative pl-3 border-l ${isToday ? 'border-pro' : isVpnMode ? 'border-gray-200' : 'border-white/10'}`}>
                                                     <div className={`absolute -left-[4px] top-0 w-2 h-2 rounded-full ${isToday ? 'bg-pro' : isVpnMode ? 'bg-gray-400' : 'bg-slate-700'}`}></div>
@@ -690,7 +875,7 @@ export default function App() {
                                                     <div className="space-y-1">{(events as AgendaEvent[]).sort((a,b) => a.time.localeCompare(b.time)).map(evt => (
                                                         <div key={evt.id} className={`flex items-center gap-2 p-1.5 rounded border text-xs ${evt.important ? (isVpnMode ? 'bg-red-50 border-red-200' : 'bg-alert/5 border-alert/20') : (isVpnMode ? 'bg-gray-50 border-gray-100' : 'bg-white/[0.02] border-white/5')}`}>
                                                             <span className={`font-mono font-bold min-w-[36px] ${evt.important ? 'text-alert' : ''}`}>{evt.time}</span>
-                                                            <span className="flex-1 truncate">{evt.title}</span><span className="text-slate-500 text-xs">{evt.duration}m</span>
+                                                            <span className="flex-1 truncate">{sanitizeForOffice(evt.title, isOfficeSanitization, data.settings)}</span><span className="text-slate-500 text-xs">{evt.duration}m</span>
                                                             <button onClick={() => setSafeData(prev => ({...prev, agenda: prev.agenda.filter(x => x.id !== evt.id)}))} className="text-slate-500 hover:text-alert opacity-40 hover:opacity-100"><Icons.Trash2 size={12}/></button>
                                                         </div>))}</div>
                                                 </div>);
@@ -709,7 +894,7 @@ export default function App() {
                                     <textarea className={`w-full h-24 border rounded-lg p-3 resize-none text-sm focus:outline-none font-mono ${isVpnMode ? 'bg-gray-50 border-gray-200 text-gray-800' : 'bg-white/[0.03] border-white/10 text-slate-200 focus:border-blue-500/50'}`} placeholder={isVpnMode ? 'Log entry...' : 'Notes...'} value={newJournalEntry} onChange={e => setNewJournalEntry(e.target.value)} />
                                     <div className="flex justify-end mt-2"><Button variant="primary" className="h-8 text-xs" onClick={() => { if (!newJournalEntry.trim()) return; setSafeData(prev => ({ ...prev, journal: [{ time: new Date().toLocaleTimeString(), date: new Date().toLocaleDateString(), text: newJournalEntry }, ...prev.journal] })); setNewJournalEntry(""); }}>{isVpnMode ? 'SAVE' : 'ENREGISTRER'}</Button></div>
                                 </Card>
-                                <div className="space-y-2">{data.journal.map((entry, i) => (<Card key={i} className="p-3"><div className="flex justify-between items-center mb-1 text-xs"><span className={`font-mono font-bold ${isVpnMode ? 'text-[#2563EB]' : 'text-blue-400'}`}>{entry.date}</span><span className="text-slate-500 font-mono">{entry.time}</span></div><div className={`text-xs whitespace-pre-wrap ${isVpnMode ? 'text-gray-700' : 'text-slate-300'}`}>{entry.text}</div></Card>))}</div>
+                                <div className="space-y-2">{isVpnMode ? (<Card className="p-6 text-center"><div className="text-gray-400 text-xs">Previous logs are hidden in secure mode.<br/>New entries created here will be visible.</div></Card>) : data.journal.map((entry, i) => (<Card key={i} className="p-3"><div className="flex justify-between items-center mb-1 text-xs"><span className={`font-mono font-bold text-blue-400`}>{entry.date}</span><span className="text-slate-500 font-mono">{entry.time}</span></div><div className={`text-xs whitespace-pre-wrap text-slate-300`}>{entry.text}</div></Card>))}</div>
                             </div>
                         )}
 
@@ -717,11 +902,31 @@ export default function App() {
                         {currentView === 'review' && (
                             <div className="space-y-4">
                                 <h2 className={`text-lg font-bold flex items-center gap-2 ${isVpnMode ? 'text-[#2563EB]' : 'text-slate-200'}`}><Icons.Calendar size={20}/> {sanitizeForOffice("WEEKLY PLAN", isOfficeSanitization, data.settings)}</h2>
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                    <Card className="p-4"><h3 className={`font-bold text-xs mb-2 flex items-center gap-1 ${isVpnMode ? 'text-gray-600' : 'text-green-500'}`}><Icons.Check size={12}/> {sanitizeForOffice("WIN", isOfficeSanitization, data.settings)}</h3><textarea className={`w-full min-h-[100px] border rounded-lg p-3 resize-none focus:outline-none text-sm ${isVpnMode ? 'bg-green-50 border-green-200 text-gray-800' : 'bg-green-500/5 border-green-500/10 text-slate-200'}`} value={data.review.win} onChange={e => setSafeData(prev => ({...prev, review: {...prev.review, win: e.target.value}}))} /></Card>
-                                    <Card className="p-4"><h3 className={`font-bold text-xs mb-2 flex items-center gap-1 ${isVpnMode ? 'text-gray-600' : 'text-red-500'}`}><Icons.X size={12}/> {sanitizeForOffice("FAIL", isOfficeSanitization, data.settings)}</h3><textarea className={`w-full min-h-[100px] border rounded-lg p-3 resize-none focus:outline-none text-sm ${isVpnMode ? 'bg-red-50 border-red-200 text-gray-800' : 'bg-red-500/5 border-red-500/10 text-slate-200'}`} value={data.review.fail} onChange={e => setSafeData(prev => ({...prev, review: {...prev.review, fail: e.target.value}}))} /></Card>
-                                </div>
-                                <Card className="p-4"><h3 className={`font-bold text-xs mb-2 uppercase ${isVpnMode ? 'text-gray-600' : 'text-gold'}`}><Icons.Star size={12} className="inline mr-1"/> {sanitizeForOffice("PRIORITÉ", isOfficeSanitization, data.settings)}</h3><Input value={data.review.priority} onChange={e => setSafeData(prev => ({...prev, review: {...prev.review, priority: e.target.value}}))} /></Card>
+                                {!isVpnMode && (<div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                    <Card className="p-4"><h3 className={`font-bold text-xs mb-2 flex items-center gap-1 text-green-500`}><Icons.Check size={12}/> {sanitizeForOffice("WIN", isOfficeSanitization, data.settings)}</h3><textarea className={`w-full min-h-[100px] border rounded-lg p-3 resize-none focus:outline-none text-sm bg-green-500/5 border-green-500/10 text-slate-200`} value={data.review.win} onChange={e => setSafeData(prev => ({...prev, review: {...prev.review, win: e.target.value}}))} /></Card>
+                                    <Card className="p-4"><h3 className={`font-bold text-xs mb-2 flex items-center gap-1 text-red-500`}><Icons.X size={12}/> {sanitizeForOffice("FAIL", isOfficeSanitization, data.settings)}</h3><textarea className={`w-full min-h-[100px] border rounded-lg p-3 resize-none focus:outline-none text-sm bg-red-500/5 border-red-500/10 text-slate-200`} value={data.review.fail} onChange={e => setSafeData(prev => ({...prev, review: {...prev.review, fail: e.target.value}}))} /></Card>
+                                </div>)}
+                                {!isVpnMode && (<Card className="p-4"><h3 className={`font-bold text-xs mb-2 uppercase text-gold`}><Icons.Star size={12} className="inline mr-1"/> {sanitizeForOffice("PRIORITÉ", isOfficeSanitization, data.settings)}</h3><Input value={data.review.priority} onChange={e => setSafeData(prev => ({...prev, review: {...prev.review, priority: e.target.value}}))} /></Card>)}
+                                {!isVpnMode && (
+                                    <div className="grid grid-cols-2 gap-3">
+                                        <Card className="p-4">
+                                            <h3 className="font-bold text-xs mb-2 flex items-center gap-1 text-amber-500"><Icons.Zap size={12}/> ENERGIE</h3>
+                                            <div className="flex gap-1.5">
+                                                {[1,2,3,4,5].map(n => (
+                                                    <button key={n} onClick={() => setSafeData(prev => ({...prev, review: {...prev.review, energy: n}}))} className={`w-8 h-8 rounded-full border text-sm font-bold transition-all ${(data.review.energy || 0) >= n ? 'bg-amber-500 border-amber-400 text-white' : 'bg-white/5 border-white/10 text-slate-500 hover:border-amber-400'}`}>{n}</button>
+                                                ))}
+                                            </div>
+                                        </Card>
+                                        <Card className="p-4">
+                                            <h3 className="font-bold text-xs mb-2 flex items-center gap-1 text-blue-500"><Icons.Target size={12}/> FOCUS</h3>
+                                            <div className="flex gap-1.5">
+                                                {[1,2,3,4,5].map(n => (
+                                                    <button key={n} onClick={() => setSafeData(prev => ({...prev, review: {...prev.review, focus: n}}))} className={`w-8 h-8 rounded-full border text-sm font-bold transition-all ${(data.review.focus || 0) >= n ? 'bg-blue-500 border-blue-400 text-white' : 'bg-white/5 border-white/10 text-slate-500 hover:border-blue-400'}`}>{n}</button>
+                                                ))}
+                                            </div>
+                                        </Card>
+                                    </div>
+                                )}
                                 <div className="space-y-2">
                                      <h3 className={`text-xs font-bold uppercase tracking-wider ${isVpnMode ? 'text-gray-500' : 'text-slate-400'}`}>{isVpnMode ? 'RESOURCE ALLOCATION' : 'BUDGET HEURES'}</h3>
                                      <div className="grid grid-cols-2 md:grid-cols-7 gap-2">
@@ -731,7 +936,7 @@ export default function App() {
                                             return (<div key={dIndex} className={`relative p-2 rounded-lg border transition-all ${isToday ? (isVpnMode ? 'bg-blue-50 border-[#2563EB]' : 'bg-blue-500/10 border-blue-500 scale-[1.02] z-10') : (isVpnMode ? 'bg-white border-gray-200' : 'bg-white/[0.02] border-white/[0.05]')}`}>
                                                 {isToday && <div className={`absolute -top-2 left-1/2 -translate-x-1/2 px-1.5 py-0.5 text-white text-[11px] font-bold rounded-full ${isVpnMode ? 'bg-[#2563EB]' : 'bg-blue-500'}`}>NOW</div>}
                                                 <div className={`text-center mb-1.5 font-bold text-xs ${isVpnMode ? 'text-gray-700' : 'text-white'}`}>{cfg.name}</div>
-                                                <div className="space-y-1">{visibleCategories.map(cat => (<div key={cat} className="flex items-center justify-between text-xs"><span className={`uppercase font-bold ${getThemeColor(cat, isOfficeSanitization)}`}>{sanitizeForOffice(cat, isOfficeSanitization, data.settings).substring(0,3)}</span><input type="number" value={cfg.budgets[cat as keyof typeof cfg.budgets]} onChange={(e) => updateBudget(cat as any, parseInt(e.target.value) || 0)} className={`w-6 text-center rounded border text-xs ${isVpnMode ? 'bg-gray-50 border-gray-200 text-gray-700' : 'bg-black/20 border-white/10 text-slate-300'}`} /></div>))}</div>
+                                                <div className="space-y-1">{(isVpnMode ? ['pro'] : visibleCategories).map(cat => (<div key={cat} className="flex items-center justify-between text-xs"><span className={`uppercase font-bold ${getThemeColor(cat, isOfficeSanitization)}`}>{sanitizeForOffice(cat, isOfficeSanitization, data.settings).substring(0,3)}</span><input type="number" value={cfg.budgets[cat as keyof typeof cfg.budgets]} onChange={(e) => updateBudget(cat as any, parseInt(e.target.value) || 0)} className={`w-6 text-center rounded border text-xs ${isVpnMode ? 'bg-gray-50 border-gray-200 text-gray-700' : 'bg-black/20 border-white/10 text-slate-300'}`} /></div>))}</div>
                                             </div>);
                                         })}
                                      </div>
@@ -747,7 +952,7 @@ export default function App() {
                                         <div className="flex flex-wrap items-center gap-2 mb-1.5">
                                              <div className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold uppercase tracking-widest text-white ${isVpnMode ? 'bg-[#2563EB]' : ''}`} style={!isVpnMode ? { backgroundColor: dayConfig.theme } : {}}>{sanitizeForOffice(dayConfig.name, isOfficeSanitization, data.settings)}</div>
                                              <div className={`flex items-center gap-2.5 px-2.5 py-0.5 rounded-full border text-xs ${isVpnMode ? 'bg-gray-50 border-gray-200' : 'bg-white/[0.03] border-white/10'}`}>
-                                                 {visibleCategories.map(type => { const s = getBudgetStatus(type as any); if (s.budget === 0) return null; const barColor: Record<string, string> = { pro: 'bg-pro', saas: 'bg-saas', patri: 'bg-patri', vie: 'bg-vie' }; return (<div key={type} className="flex items-center gap-1.5"><span className={`font-bold uppercase ${getThemeColor(type, isOfficeSanitization)}`}>{sanitizeForOffice(type, isOfficeSanitization, data.settings).substring(0,3)}</span><div className={`w-16 h-2 rounded-full overflow-hidden ${isVpnMode ? 'bg-gray-200' : 'bg-white/10'}`}><div className={`h-full rounded-full ${s.pct > 100 ? 'bg-red-500' : isVpnMode ? 'bg-[#2563EB]' : barColor[type] || 'bg-white/50'}`} style={{width: `${s.pct}%`}}></div></div><span className={`font-mono ${isVpnMode ? 'text-gray-400' : 'text-slate-500'}`}>{s.consumed.toFixed(1)}/{s.budget}</span></div>); })}
+                                                 {(isVpnMode ? ['pro'] : visibleCategories).map(type => { const s = getBudgetStatus(type as any); if (s.budget === 0) return null; const barColor: Record<string, string> = { pro: 'bg-pro', saas: 'bg-saas', patri: 'bg-patri', vie: 'bg-vie' }; return (<div key={type} className="flex items-center gap-1.5"><span className={`font-bold uppercase ${getThemeColor(type, isOfficeSanitization)}`}>{sanitizeForOffice(type, isOfficeSanitization, data.settings).substring(0,3)}</span><div className={`w-16 h-2 rounded-full overflow-hidden ${isVpnMode ? 'bg-gray-200' : 'bg-white/10'}`}><div className={`h-full rounded-full ${s.pct > 100 ? 'bg-red-500' : isVpnMode ? 'bg-[#2563EB]' : barColor[type] || 'bg-white/50'}`} style={{width: `${s.pct}%`}}></div></div><span className={`font-mono ${isVpnMode ? 'text-gray-400' : 'text-slate-500'}`}>{s.consumed.toFixed(1)}/{s.budget}</span></div>); })}
                                              </div>
                                         </div>
                                         <h1 className={`text-xl md:text-2xl font-light ${mutedText}`}>{getGreeting()}, <span className={`font-semibold ${isVpnMode ? 'text-gray-800' : 'text-white'}`}>{userName}</span></h1>
@@ -759,23 +964,85 @@ export default function App() {
                                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
                                     {/* ANCRE — Hero Card */}
                                     <Card className={`p-4 md:col-span-2 flex flex-col min-h-[180px] border-l-[3px] ${isVpnMode ? 'border-l-[#2563EB]' : 'border-l-gold'}`}>
-                                        {top3.length > 0 ? (<>
-                                            <div className={`text-xs font-bold tracking-widest uppercase mb-3 ${isVpnMode ? 'text-gray-400' : 'text-gold'}`}>{sanitizeForOffice("ANCRE", isOfficeSanitization, data.settings)}</div>
-                                            <div className="cursor-pointer hover:opacity-80 mb-3" onClick={() => startInlineTimer(top3[0])}>
-                                                <h2 className={`text-base md:text-lg font-bold leading-snug mb-1 ${isVpnMode ? 'text-gray-800' : 'text-white'}`}>{sanitizeForOffice(top3[0].text, isOfficeSanitization, data.settings)}</h2>
-                                                <div className="flex gap-3 text-xs opacity-60"><span className={`uppercase font-bold ${getThemeColor(top3[0].type, isOfficeSanitization)}`}>{sanitizeForOffice(top3[0].type, isOfficeSanitization, data.settings)}</span><span className="flex items-center gap-1"><Icons.Clock size={11}/>{getTaskDuration(top3[0].text) * 60}m</span></div>
+                                        <div className="flex flex-col md:flex-row gap-4 flex-1">
+                                            {/* LEFT: Ancre task */}
+                                            <div className="flex flex-col flex-1 min-w-0">
+                                                {top3.length > 0 ? (<>
+                                                    <div className={`text-xs font-bold tracking-widest uppercase mb-1 ${isVpnMode ? 'text-gray-400' : 'text-gold'}`}>{sanitizeForOffice("ANCRE", isOfficeSanitization, data.settings)}</div>
+                                                    {ancreAlert && <div className={`text-[10px] font-bold tracking-widest mb-2 animate-pulse ${isVpnMode ? 'text-orange-600' : 'text-alert'}`}>{isVpnMode ? 'PRIMARY TASK PENDING' : 'ANCRE EN ATTENTE'}</div>}
+                                                    <div className="cursor-pointer hover:opacity-80 mb-3" onClick={() => startInlineTimer(top3[0])}>
+                                                        <h2 className={`text-lg md:text-xl font-black leading-snug mb-1 ${isVpnMode ? 'text-gray-800' : 'text-white'}`}>{sanitizeForOffice(top3[0].text, isOfficeSanitization, data.settings)}</h2>
+                                                        <div className="flex gap-3 text-xs opacity-60"><span className={`uppercase font-bold ${getThemeColor(top3[0].type, isOfficeSanitization)}`}>{sanitizeForOffice(top3[0].type, isOfficeSanitization, data.settings)}</span><span className="flex items-center gap-1"><Icons.Clock size={11}/>{getTaskDuration(top3[0].text) * 60}m</span></div>
+                                                    </div>
+                                                    <div className="mt-auto flex items-center gap-3">
+                                                        <button onClick={() => { const t = top3[0]; if(t) setFocusTask(t); }} className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition-all ${isVpnMode ? 'bg-[#2563EB] text-white hover:bg-[#005fa3]' : 'bg-gold/20 text-gold border border-gold/30 hover:bg-gold/30'}`}><Icons.Target size={14}/> START FOCUS</button>
+                                                    </div>
+                                                </>) : (<div className="py-6 text-center flex-1 flex flex-col justify-center"><div className={`text-sm font-bold mb-1 ${isVpnMode ? 'text-gray-500' : 'text-slate-400'}`}>{isVpnMode ? 'No primary task' : 'Pas d\'ancre'}</div><div className={`text-xs ${isVpnMode ? 'text-gray-400' : 'text-slate-600'}`}>{isVpnMode ? 'Star a task to set your anchor' : 'Star une tâche pour définir ton ancre'}</div></div>)}
                                             </div>
-                                            <div className="mt-auto flex items-center gap-3">
-                                                <button onClick={() => { const t = top3[0]; if(t) setFocusTask(t); }} className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition-all ${isVpnMode ? 'bg-[#2563EB] text-white hover:bg-[#005fa3]' : 'bg-gold/20 text-gold border border-gold/30 hover:bg-gold/30'}`}><Icons.Target size={14}/> START FOCUS</button>
-                                            </div>
-                                            {top3.length > 1 && (<div className={`pt-3 mt-3 border-t space-y-1.5 ${isVpnMode ? 'border-gray-100' : 'border-white/5'}`}><div className={`text-xs font-bold uppercase mb-1 ${isVpnMode ? 'text-gray-400' : 'text-slate-500'}`}>{sanitizeForOffice("Soutien", isOfficeSanitization, data.settings)}</div>{top3.slice(1).map(t => (<div key={t.id} className="flex items-center gap-2 cursor-pointer hover:opacity-80" onClick={() => startInlineTimer(t)}><div className={`w-1.5 h-1.5 rounded-full ${getThemeColor(t.type, isOfficeSanitization)} bg-current`}></div><span className={`text-xs truncate ${isVpnMode ? 'text-gray-600' : 'text-slate-400'}`}>{sanitizeForOffice(t.text, isOfficeSanitization, data.settings)}</span></div>))}</div>)}
-                                        </>) : (<div className="py-6 text-center flex-1 flex flex-col justify-center"><div className={`text-sm font-bold mb-1 ${isVpnMode ? 'text-gray-500' : 'text-slate-400'}`}>{isVpnMode ? 'No primary task' : 'Pas d\'ancre'}</div><div className={`text-xs ${isVpnMode ? 'text-gray-400' : 'text-slate-600'}`}>{isVpnMode ? 'Star a task to set your anchor' : 'Star une tâche pour définir ton ancre'}</div></div>)}
+                                            {/* RIGHT: Upcoming RDV alerts (inside ancre card) */}
+                                            {(() => {
+                                                const todayD = new Date(); todayD.setHours(0,0,0,0);
+                                                const upcoming = radarEvents.filter(evt => {
+                                                    const d = new Date(evt.date + 'T00:00:00');
+                                                    const diff = Math.round((d.getTime() - todayD.getTime()) / 86400000);
+                                                    return diff <= 2;
+                                                });
+                                                if (upcoming.length === 0) return null;
+                                                return (
+                                                    <div className={`md:w-44 lg:w-52 flex-shrink-0 rounded-xl p-3 space-y-2 ${isVpnMode ? 'bg-gray-50 border border-gray-200' : 'bg-white/[0.03] border border-white/[0.06]'}`}>
+                                                        <div className={`text-[10px] font-bold uppercase tracking-widest flex items-center gap-1.5 ${isVpnMode ? 'text-gray-400' : 'text-slate-500'}`}><Icons.Bell size={11} className={isVpnMode ? '' : 'animate-pulse'} /> {isVpnMode ? 'UPCOMING' : 'PROCHAINS RDV'}</div>
+                                                        {upcoming.map(evt => {
+                                                            const d = new Date(evt.date + 'T00:00:00');
+                                                            const diff = Math.round((d.getTime() - todayD.getTime()) / 86400000);
+                                                            const label = diff === 0 ? (isVpnMode ? 'Today' : "Auj.") : diff === 1 ? (isVpnMode ? 'Tomorrow' : 'Demain') : (isVpnMode ? 'In 2 days' : 'J-2');
+                                                            const color = diff === 0 ? (isVpnMode ? 'text-blue-600' : 'text-pro') : diff === 1 ? (isVpnMode ? 'text-orange-600' : 'text-gold') : (isVpnMode ? 'text-gray-500' : 'text-slate-400');
+                                                            return (
+                                                                <div key={evt.id} className={`flex flex-col gap-0.5 p-2 rounded-lg ${diff === 0 ? (isVpnMode ? 'bg-blue-50 border border-blue-200' : 'bg-pro/10 border border-pro/20') : diff === 1 ? (isVpnMode ? 'bg-orange-50 border border-orange-200' : 'bg-gold/10 border border-gold/20') : (isVpnMode ? 'bg-white border border-gray-100' : 'bg-white/[0.02] border border-white/5')}`}>
+                                                                    <div className="flex items-center justify-between">
+                                                                        <span className={`text-[10px] font-black uppercase ${color}`}>{label}</span>
+                                                                        <span className={`text-xs font-mono font-bold ${color}`}>{evt.time}</span>
+                                                                    </div>
+                                                                    <span className={`text-xs font-medium truncate ${isVpnMode ? 'text-gray-700' : 'text-slate-300'}`}>{sanitizeForOffice(evt.title, isOfficeSanitization, data.settings)}</span>
+                                                                </div>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                );
+                                            })()}
+                                        </div>
+                                        {/* SOUTIEN (below the flex row) */}
+                                        {top3.length > 1 && (<div className={`pt-3 mt-3 border-t space-y-1.5 ${isVpnMode ? 'border-gray-100' : 'border-white/5'}`}><div className={`text-xs font-bold uppercase mb-1 ${isVpnMode ? 'text-gray-400' : 'text-slate-500'}`}>{sanitizeForOffice("Soutien", isOfficeSanitization, data.settings)}</div>{top3.slice(1).map(t => (<div key={t.id} className="flex items-center gap-2 cursor-pointer hover:opacity-80" onClick={() => startInlineTimer(t)}><div className={`w-1.5 h-1.5 rounded-full ${getThemeColor(t.type, isOfficeSanitization)} bg-current`}></div><span className={`text-xs truncate ${isVpnMode ? 'text-gray-600' : 'text-slate-400'}`}>{sanitizeForOffice(t.text, isOfficeSanitization, data.settings)}</span></div>))}</div>)}
                                     </Card>
 
-                                    {/* STATS */}
+                                    {/* STATS + MOTIVATION ENGINE */}
                                     <Card className="p-4 flex flex-col">
                                         <h3 className={`text-xs font-bold uppercase flex items-center gap-1.5 mb-3 ${isVpnMode ? 'text-gray-500' : 'text-slate-400'}`}><Icons.Activity size={14}/> {isVpnMode ? 'Metrics' : 'Stats'}</h3>
                                         <div className="space-y-2.5 flex-1">
+                                            {/* DAILY SCORE */}
+                                            <div className={`p-3 rounded-lg border ${isVpnMode ? 'bg-gray-50 border-gray-100' : 'bg-white/[0.03] border-white/5'}`}>
+                                                <div className={`text-xs uppercase font-bold mb-0.5 ${isVpnMode ? 'text-gray-400' : 'text-slate-500'}`}>{isVpnMode ? 'Progress' : 'Score'}</div>
+                                                <div className={`text-3xl font-black font-mono ${getScoreColor(dailyScore, isVpnMode)}`}>{dailyScore}%</div>
+                                            </div>
+                                            {/* 7-DAY SPARKLINE */}
+                                            {(data.dailyScores?.length || 0) > 0 && (
+                                                <div className={`p-3 rounded-lg border ${isVpnMode ? 'bg-gray-50 border-gray-100' : 'bg-white/[0.03] border-white/5'}`}>
+                                                    <div className={`text-xs uppercase font-bold mb-2 ${isVpnMode ? 'text-gray-400' : 'text-slate-500'}`}>{isVpnMode ? '7 Days' : '7 Jours'}</div>
+                                                    <div className="flex items-end gap-1 h-8">
+                                                        {(data.dailyScores || []).map((ds, i) => (
+                                                            <div key={i} className="flex-1">
+                                                                <div className={`w-full rounded-sm min-h-[2px] ${ds.score > 80 ? (isVpnMode ? 'bg-green-500' : 'bg-saas') : ds.score > 50 ? (isVpnMode ? 'bg-orange-400' : 'bg-gold') : (isVpnMode ? 'bg-red-400' : 'bg-alert')}`} style={{ height: `${Math.max(4, (ds.score / 100) * 32)}px` }} />
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            )}
+                                            {/* DEEP WORK */}
+                                            {deepWorkCount > 0 && (
+                                                <div className={`p-3 rounded-lg border ${isVpnMode ? 'bg-gray-50 border-gray-100' : 'bg-white/[0.03] border-white/5'}`}>
+                                                    <div className={`text-xs uppercase font-bold mb-0.5 ${isVpnMode ? 'text-gray-400' : 'text-slate-500'}`}>{isVpnMode ? 'Sessions' : 'Deep Work'}</div>
+                                                    <div className={`text-2xl font-bold font-mono ${isVpnMode ? 'text-[#2563EB]' : 'text-pro'}`}>{deepWorkCount}</div>
+                                                </div>
+                                            )}
                                             <div className={`p-3 rounded-lg border ${isVpnMode ? 'bg-gray-50 border-gray-100' : 'bg-white/[0.03] border-white/5'}`}><div className={`text-xs uppercase font-bold mb-0.5 ${isVpnMode ? 'text-gray-400' : 'text-slate-500'}`}>{isVpnMode ? 'Done' : 'Terminées'}</div><div className={`text-2xl font-bold font-mono ${isVpnMode ? 'text-[#2563EB]' : 'text-saas'}`}>{todayCompleted}</div></div>
                                             <div className={`p-3 rounded-lg border ${isVpnMode ? 'bg-gray-50 border-gray-100' : 'bg-white/[0.03] border-white/5'}`}><div className={`text-xs uppercase font-bold mb-0.5 ${isVpnMode ? 'text-gray-400' : 'text-slate-500'}`}>{isVpnMode ? 'Active' : 'En cours'}</div><div className={`text-2xl font-bold font-mono ${isVpnMode ? 'text-gray-800' : 'text-white'}`}>{activeTasks.length}</div></div>
                                             <div className={`p-3 rounded-lg border ${isVpnMode ? 'bg-gray-50 border-gray-100' : 'bg-white/[0.03] border-white/5'}`}><div className={`text-xs uppercase font-bold mb-0.5 ${isVpnMode ? 'text-gray-400' : 'text-slate-500'}`}>{isVpnMode ? 'Priority' : 'Stars'}</div><div className={`text-2xl font-bold font-mono ${isVpnMode ? 'text-orange-600' : 'text-gold'}`}>{todayTotal}</div></div>
@@ -787,57 +1054,87 @@ export default function App() {
                                 <Card className="p-3 mb-4">
                                     <div className="flex items-center justify-between mb-2"><h3 className={`text-xs font-bold uppercase flex items-center gap-1.5 ${isVpnMode ? 'text-gray-500' : 'text-slate-400'}`}><Icons.Calendar size={14}/> {isVpnMode ? 'Schedule' : 'Radar 7J'}</h3><span className={`text-xs px-2 py-0.5 rounded-full ${isVpnMode ? 'bg-gray-100 text-gray-500' : 'bg-white/10 text-slate-400'}`}>{radarEvents.length}</span></div>
                                     <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-hide">
-                                        {radarEvents.length > 0 ? radarEvents.map(evt => (<div key={evt.id} className={`flex-shrink-0 w-48 p-3 rounded-lg border ${evt.important ? (isVpnMode ? 'bg-red-50 border-red-200' : 'bg-alert/5 border-alert/20') : (isVpnMode ? 'bg-gray-50 border-gray-100 hover:bg-gray-100' : 'bg-white/[0.03] border-white/5 hover:bg-white/[0.06]')} transition-colors`}><div className="flex items-center gap-2 mb-1"><span className={`text-xs font-bold uppercase ${isVpnMode ? 'text-gray-400' : 'text-slate-500'}`}>{new Date(evt.date).toLocaleDateString(isVpnMode ? 'en-US' : 'fr-FR', {weekday: 'short'})}</span><span className={`text-sm font-bold ${evt.important ? 'text-alert' : isVpnMode ? 'text-gray-700' : 'text-slate-300'}`}>{new Date(evt.date).getDate()}</span><span className={`ml-auto text-xs font-mono ${isVpnMode ? 'text-gray-500' : 'text-slate-500'}`}>{evt.time}</span></div><div className={`text-xs font-medium truncate ${evt.important ? 'font-bold' : ''} ${isVpnMode ? 'text-gray-700' : 'text-slate-300'}`}>{evt.title}</div><div className="text-xs text-slate-500 mt-0.5">{evt.duration}m</div></div>)) : <div className={`text-center text-xs py-4 w-full ${isVpnMode ? 'text-gray-400' : 'text-slate-600'}`}>{isVpnMode ? 'No upcoming events.' : 'Aucun événement à venir.'}</div>}
+                                        {radarEvents.length > 0 ? radarEvents.map(evt => (<div key={evt.id} className={`flex-shrink-0 w-48 p-3 rounded-lg border ${evt.important ? (isVpnMode ? 'bg-red-50 border-red-200' : 'bg-alert/5 border-alert/20') : (isVpnMode ? 'bg-gray-50 border-gray-100 hover:bg-gray-100' : 'bg-white/[0.03] border-white/5 hover:bg-white/[0.06]')} transition-colors`}><div className="flex items-center gap-2 mb-1"><span className={`text-xs font-bold uppercase ${isVpnMode ? 'text-gray-400' : 'text-slate-500'}`}>{new Date(evt.date).toLocaleDateString(isVpnMode ? 'en-US' : 'fr-FR', {weekday: 'short'})}</span><span className={`text-sm font-bold ${evt.important ? 'text-alert' : isVpnMode ? 'text-gray-700' : 'text-slate-300'}`}>{new Date(evt.date).getDate()}</span><span className={`ml-auto text-xs font-mono ${isVpnMode ? 'text-gray-500' : 'text-slate-500'}`}>{evt.time}</span></div><div className={`text-xs font-medium truncate ${evt.important ? 'font-bold' : ''} ${isVpnMode ? 'text-gray-700' : 'text-slate-300'}`}>{sanitizeForOffice(evt.title, isOfficeSanitization, data.settings)}</div><div className="text-xs text-slate-500 mt-0.5">{evt.duration}m</div></div>)) : <div className={`text-center text-xs py-4 w-full ${isVpnMode ? 'text-gray-400' : 'text-slate-600'}`}>{isVpnMode ? 'No upcoming events.' : 'Aucun événement à venir.'}</div>}
                                     </div>
                                 </Card>
 
                                 {/* ROW 3: CATEGORIES — Dynamic height columns */}
-                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
-                                    {visibleCategories.map(type => {
-                                        const budget = dayConfig.budgets[type as keyof typeof dayConfig.budgets] || 0;
-                                        const isPriority = budget > 0; const isMajor = budget >= 3;
-                                        let glow = "";
-                                        if (!isVpnMode && isPriority) {
-                                            const colors: Record<string, string> = { pro: 'blue', saas: 'emerald', patri: 'purple', vie: 'pink' };
-                                            const c = colors[type] || 'blue';
-                                            glow = isMajor ? `border-${c}-500/40` : `border-${c}-500/20`;
-                                        }
-                                        const todayTasks = data.tasks.filter(t => (type==='patri'?['patri',...ASSETS_KEYS].includes(t.type):t.type===type) && !t.done && t.todayStar);
-                                        const backlogTasks = data.tasks.filter(t => (type==='patri'?['patri',...ASSETS_KEYS].includes(t.type):t.type===type) && !t.done && !t.todayStar);
-
-                                        return (<div key={type} className={getCardClass(`p-3 flex flex-col min-h-[320px] max-h-[calc(100vh-520px)] ${glow}`)}>
-                                             <div className="flex justify-between items-center mb-2">
-                                                <h3 className={`text-sm font-bold flex items-center gap-1.5 uppercase tracking-wider ${getThemeColor(type, isOfficeSanitization)}`}>{sanitizeForOffice(type.toUpperCase(), isOfficeSanitization, data.settings)}{!isVpnMode && isPriority && <div className={`w-1.5 h-1.5 rounded-full ${isMajor ? 'animate-pulse' : ''} bg-current`}></div>}</h3>
-                                                <div className="flex items-center gap-2">
-                                                    {type === 'pro' && data.settings.eyeCare && (<div className={`flex items-center gap-1 px-1.5 py-0.5 rounded-full border text-xs font-mono ${eyeTimeLeft < 60 ? (isVpnMode ? 'border-red-200 bg-red-50 text-red-600' : 'border-red-500/30 bg-red-500/10 text-red-400 animate-pulse') : (isVpnMode ? 'border-gray-200 bg-gray-50 text-gray-500' : 'border-white/10 bg-white/5 text-blue-400')}`}><Icons.Eye size={10} />{Math.floor(eyeTimeLeft / 60)}:{(eyeTimeLeft % 60).toString().padStart(2, '0')}</div>)}
-                                                    <span className={`text-xs font-mono ${isVpnMode ? 'text-gray-400' : 'opacity-50'}`}>{todayTasks.length + backlogTasks.length}</span>
+                                {isVpnMode ? (
+                                    /* === VPN MODE: 4 Bureau Columns (pro tasks only, filtered by vpnColumn) === */
+                                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+                                        {([1, 2, 3, 4] as const).map(colNum => {
+                                            const colName = vpnCols[`col${colNum}` as keyof typeof vpnCols];
+                                            const colTasks = data.tasks.filter(t => t.type === 'pro' && !t.done && t.vpnColumn === colNum);
+                                            const todayTasks = colTasks.filter(t => t.todayStar);
+                                            const backlogTasks = colTasks.filter(t => !t.todayStar);
+                                            return (<div key={colNum} className={getCardClass('p-3 flex flex-col min-h-[320px] max-h-[calc(100vh-520px)]')}>
+                                                <div className="flex justify-between items-center mb-2">
+                                                    <h3 className="text-sm font-bold flex items-center gap-1.5 uppercase tracking-wider text-[#2563EB]">{colName}</h3>
+                                                    <div className="flex items-center gap-2">
+                                                        {colNum === 1 && data.settings.eyeCare && (<div className={`flex items-center gap-1 px-1.5 py-0.5 rounded-full border text-xs font-mono ${eyeTimeLeft < 60 ? 'border-red-200 bg-red-50 text-red-600' : 'border-gray-200 bg-gray-50 text-gray-500'}`}><Icons.Eye size={10} />{Math.floor(eyeTimeLeft / 60)}:{(eyeTimeLeft % 60).toString().padStart(2, '0')}</div>)}
+                                                        <span className="text-xs font-mono text-gray-400">{todayTasks.length + backlogTasks.length}</span>
+                                                    </div>
                                                 </div>
-                                             </div>
-                                             <div className="flex-1 overflow-y-auto pr-0.5 space-y-0">
-                                                {/* TODAY section */}
-                                                {todayTasks.length > 0 && (<div className="mb-2">
-                                                    <div className={`flex items-center gap-1.5 mb-1 px-1 ${isVpnMode ? 'text-orange-600' : 'text-gold'}`}><Icons.Star size={12} fill="currentColor"/><span className="text-xs font-bold uppercase tracking-wider">TODAY</span></div>
-                                                    {type === 'patri' ? (<div className="space-y-1">{todayTasks.map(t => (<TaskRow key={t.id} task={t} onToggle={toggleTaskSafe} onDelete={deleteTaskSafe} onStar={toggleTodayStar} onFocus={() => startInlineTimer(t)} isBlurred={false} showTypeDot={false} isOfficeMode={isOfficeSanitization} />))}</div>) : todayTasks.map(t => (<TaskRow key={t.id} task={t} onToggle={toggleTaskSafe} onDelete={deleteTaskSafe} onStar={toggleTodayStar} onFocus={() => startInlineTimer(t)} isBlurred={false} showTypeDot={false} isOfficeMode={isOfficeSanitization} />))}
-                                                </div>)}
-                                                {/* BACKLOG section */}
-                                                {backlogTasks.length > 0 && (<div className={todayTasks.length > 0 ? `pt-2 border-t ${isVpnMode ? 'border-gray-100' : 'border-white/5'}` : ''}>
-                                                    <div className={`flex items-center gap-1.5 mb-1 px-1 ${isVpnMode ? 'text-gray-400' : 'text-slate-600'}`}><span className="text-xs font-bold uppercase tracking-wider">BACKLOG</span><span className="text-xs opacity-50">{backlogTasks.length}</span></div>
-                                                    {type === 'patri' ? (<div className="space-y-2">
-                                                        {ASSETS_KEYS.map(sub => { const st = backlogTasks.filter(t => t.type === sub); if(st.length === 0) return null; return (<div key={sub} className={`rounded p-1.5 border ${isVpnMode ? 'bg-gray-50 border-gray-100' : 'bg-white/[0.02] border-white/[0.04]'}`}><div className={`text-xs font-bold uppercase mb-1 flex justify-between ${isVpnMode ? 'text-gray-500' : 'text-patri'}`}>{sanitizeForOffice(sub, isOfficeSanitization, data.settings)}<span className="opacity-50">{st.length}</span></div>{st.map(t => (<TaskRow key={t.id} task={t} onToggle={toggleTaskSafe} onDelete={deleteTaskSafe} onStar={toggleTodayStar} onFocus={() => startInlineTimer(t)} isBlurred={false} showTypeDot={false} isOfficeMode={isOfficeSanitization} />))}</div>); })}
-                                                        {backlogTasks.filter(t => t.type === 'patri').length > 0 && (<div className={`rounded p-1.5 border ${isVpnMode ? 'bg-gray-50 border-gray-100' : 'bg-white/[0.02] border-white/[0.04]'}`}><div className={`text-xs font-bold uppercase mb-1 ${isVpnMode ? 'text-gray-500' : 'text-slate-400'}`}>{isVpnMode ? 'General' : 'Général'}</div>{backlogTasks.filter(t => t.type === 'patri').map(t => (<TaskRow key={t.id} task={t} onToggle={toggleTaskSafe} onDelete={deleteTaskSafe} onStar={toggleTodayStar} onFocus={() => startInlineTimer(t)} isBlurred={false} showTypeDot={false} isOfficeMode={isOfficeSanitization} />))}</div>)}
-                                                    </div>) : backlogTasks.map(t => (<TaskRow key={t.id} task={t} onToggle={toggleTaskSafe} onDelete={deleteTaskSafe} onStar={toggleTodayStar} onFocus={() => startInlineTimer(t)} isBlurred={false} showTypeDot={false} isOfficeMode={isOfficeSanitization} />))}
-                                                </div>)}
-                                                {/* ADD TASK — Full-width dashed button */}
-                                                <button onClick={() => { setModalDefaultType(type as TaskType); setShowTaskModal(true); }} className={`w-full py-2.5 mt-2 rounded-lg border-2 border-dashed text-xs font-semibold flex items-center justify-center gap-1.5 transition-all ${isVpnMode ? 'border-gray-200 text-gray-400 hover:border-gray-300 hover:text-gray-600' : 'border-white/10 text-slate-500 hover:border-white/20 hover:text-slate-300 hover:bg-white/[0.02]'}`}><Icons.Plus size={14}/> {isVpnMode ? 'Add' : 'Ajouter'}</button>
-                                             </div>
-                                        </div>);
-                                    })}
-                                </div>
+                                                <div className="flex-1 overflow-y-auto pr-0.5 space-y-0">
+                                                    {todayTasks.length > 0 && (<div className="mb-2">
+                                                        <div className="flex items-center gap-1.5 mb-1 px-1 text-orange-600"><Icons.Star size={12} fill="currentColor"/><span className="text-xs font-bold uppercase tracking-wider">TODAY</span></div>
+                                                        {todayTasks.map(t => (<TaskRow key={t.id} task={t} onToggle={toggleTaskSafe} onDelete={deleteTaskSafe} onStar={toggleTodayStar} onFocus={() => startInlineTimer(t)} isBlurred={false} showTypeDot={false} isOfficeMode={true} allTasks={data.tasks} />))}
+                                                    </div>)}
+                                                    {backlogTasks.length > 0 && (<div className={todayTasks.length > 0 ? 'pt-2 border-t border-gray-100' : ''}>
+                                                        <div className="flex items-center gap-1.5 mb-1 px-1 text-gray-400"><span className="text-xs font-bold uppercase tracking-wider">BACKLOG</span><span className="text-xs opacity-50">{backlogTasks.length}</span></div>
+                                                        {backlogTasks.map(t => (<TaskRow key={t.id} task={t} onToggle={toggleTaskSafe} onDelete={deleteTaskSafe} onStar={toggleTodayStar} onFocus={() => startInlineTimer(t)} isBlurred={false} showTypeDot={false} isOfficeMode={true} allTasks={data.tasks} />))}
+                                                    </div>)}
+                                                    <button onClick={() => { setModalDefaultType('pro'); setShowTaskModal(true); setVpnModalColumn(colNum); }} className="w-full py-2.5 mt-2 rounded-lg border-2 border-dashed text-xs font-semibold flex items-center justify-center gap-1.5 transition-all border-gray-200 text-gray-400 hover:border-gray-300 hover:text-gray-600"><Icons.Plus size={14}/> Add</button>
+                                                </div>
+                                            </div>);
+                                        })}
+                                    </div>
+                                ) : (
+                                    /* === HOME MODE: 4 Classic Columns (pro, saas, patri, vie) — UNCHANGED === */
+                                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+                                        {visibleCategories.map(type => {
+                                            const budget = dayConfig.budgets[type as keyof typeof dayConfig.budgets] || 0;
+                                            const isPriority = budget > 0; const isMajor = budget >= 3;
+                                            let glow = "";
+                                            if (isPriority) {
+                                                const colors: Record<string, string> = { pro: 'blue', saas: 'emerald', patri: 'purple', vie: 'pink' };
+                                                const c = colors[type] || 'blue';
+                                                glow = isMajor ? `border-${c}-500/40` : `border-${c}-500/20`;
+                                            }
+                                            const todayTasks = data.tasks.filter(t => (type==='patri'?['patri',...ASSETS_KEYS].includes(t.type):t.type===type) && !t.done && t.todayStar);
+                                            const backlogTasks = data.tasks.filter(t => (type==='patri'?['patri',...ASSETS_KEYS].includes(t.type):t.type===type) && !t.done && !t.todayStar);
+
+                                            return (<div key={type} className={getCardClass(`p-3 flex flex-col min-h-[320px] max-h-[calc(100vh-520px)] ${glow}`)}>
+                                                 <div className="flex justify-between items-center mb-2">
+                                                    <h3 className={`text-sm font-bold flex items-center gap-1.5 uppercase tracking-wider ${getThemeColor(type, false)}`}>{type.toUpperCase()}{isPriority && <div className={`w-1.5 h-1.5 rounded-full ${isMajor ? 'animate-pulse' : ''} bg-current`}></div>}</h3>
+                                                    <div className="flex items-center gap-2">
+                                                        {type === 'pro' && data.settings.eyeCare && (<div className={`flex items-center gap-1 px-1.5 py-0.5 rounded-full border text-xs font-mono ${eyeTimeLeft < 60 ? 'border-red-500/30 bg-red-500/10 text-red-400 animate-pulse' : 'border-white/10 bg-white/5 text-blue-400'}`}><Icons.Eye size={10} />{Math.floor(eyeTimeLeft / 60)}:{(eyeTimeLeft % 60).toString().padStart(2, '0')}</div>)}
+                                                        <span className="text-xs font-mono opacity-50">{todayTasks.length + backlogTasks.length}</span>
+                                                    </div>
+                                                 </div>
+                                                 <div className="flex-1 overflow-y-auto pr-0.5 space-y-0">
+                                                    {todayTasks.length > 0 && (<div className="mb-2">
+                                                        <div className="flex items-center gap-1.5 mb-1 px-1 text-gold"><Icons.Star size={12} fill="currentColor"/><span className="text-xs font-bold uppercase tracking-wider">TODAY</span></div>
+                                                        {type === 'patri' ? (<div className="space-y-1">{todayTasks.map(t => (<TaskRow key={t.id} task={t} onToggle={toggleTaskSafe} onDelete={deleteTaskSafe} onStar={toggleTodayStar} onFocus={() => startInlineTimer(t)} isBlurred={false} showTypeDot={false} isOfficeMode={false} allTasks={data.tasks} />))}</div>) : todayTasks.map(t => (<TaskRow key={t.id} task={t} onToggle={toggleTaskSafe} onDelete={deleteTaskSafe} onStar={toggleTodayStar} onFocus={() => startInlineTimer(t)} isBlurred={false} showTypeDot={false} isOfficeMode={false} allTasks={data.tasks} />))}
+                                                    </div>)}
+                                                    {backlogTasks.length > 0 && (<div className={todayTasks.length > 0 ? 'pt-2 border-t border-white/5' : ''}>
+                                                        <div className="flex items-center gap-1.5 mb-1 px-1 text-slate-600"><span className="text-xs font-bold uppercase tracking-wider">BACKLOG</span><span className="text-xs opacity-50">{backlogTasks.length}</span></div>
+                                                        {type === 'patri' ? (<div className="space-y-2">
+                                                            {ASSETS_KEYS.map(sub => { const st = backlogTasks.filter(t => t.type === sub); if(st.length === 0) return null; return (<div key={sub} className="rounded p-1.5 border bg-white/[0.02] border-white/[0.04]"><div className="text-xs font-bold uppercase mb-1 flex justify-between text-patri">{sub}<span className="opacity-50">{st.length}</span></div>{st.map(t => (<TaskRow key={t.id} task={t} onToggle={toggleTaskSafe} onDelete={deleteTaskSafe} onStar={toggleTodayStar} onFocus={() => startInlineTimer(t)} isBlurred={false} showTypeDot={false} isOfficeMode={false} allTasks={data.tasks} />))}</div>); })}
+                                                            {backlogTasks.filter(t => t.type === 'patri').length > 0 && (<div className="rounded p-1.5 border bg-white/[0.02] border-white/[0.04]"><div className="text-xs font-bold uppercase mb-1 text-slate-400">Général</div>{backlogTasks.filter(t => t.type === 'patri').map(t => (<TaskRow key={t.id} task={t} onToggle={toggleTaskSafe} onDelete={deleteTaskSafe} onStar={toggleTodayStar} onFocus={() => startInlineTimer(t)} isBlurred={false} showTypeDot={false} isOfficeMode={false} allTasks={data.tasks} />))}</div>)}
+                                                        </div>) : backlogTasks.map(t => (<TaskRow key={t.id} task={t} onToggle={toggleTaskSafe} onDelete={deleteTaskSafe} onStar={toggleTodayStar} onFocus={() => startInlineTimer(t)} isBlurred={false} showTypeDot={false} isOfficeMode={false} allTasks={data.tasks} />))}
+                                                    </div>)}
+                                                    <button onClick={() => { setModalDefaultType(type as TaskType); setShowTaskModal(true); }} className="w-full py-2.5 mt-2 rounded-lg border-2 border-dashed text-xs font-semibold flex items-center justify-center gap-1.5 transition-all border-white/10 text-slate-500 hover:border-white/20 hover:text-slate-300 hover:bg-white/[0.02]"><Icons.Plus size={14}/> Ajouter</button>
+                                                 </div>
+                                            </div>);
+                                        })}
+                                    </div>
+                                )}
                              </>
                          )}
 
                          {/* CATEGORY DETAIL VIEWS */}
-                         {['pro', 'saas', 'vie', 'patri'].includes(currentView) && (
+                         {(isVpnMode ? ['pro'] : ['pro', 'saas', 'vie', 'patri']).includes(currentView) && (
                             <div className="space-y-3">
                                 <h2 className={`text-lg font-bold uppercase ${isVpnMode ? 'text-[#2563EB]' : ''}`}>{sanitizeForOffice(currentView, isOfficeSanitization, data.settings)}</h2>
                                 <div className={getCardClass("p-3 flex flex-col min-h-[400px] max-h-[calc(100vh-200px)]")}>
@@ -869,12 +1166,22 @@ export default function App() {
                                     <div><label className={`text-xs mb-0.5 block ${mutedText}`}>Name</label><Input value={data.settings.userName || ''} onChange={e => setSafeData(p => ({...p, settings: {...p.settings, userName: e.target.value}}))} placeholder="Operator" className="text-xs" /></div>
                                     <div><label className={`text-xs mb-0.5 block ${mutedText}`}>{isVpnMode ? 'App Name (VPN)' : 'Nom app (VPN)'}</label><Input value={data.settings.vpnAppName || ''} onChange={e => setSafeData(p => ({...p, settings: {...p.settings, vpnAppName: e.target.value}}))} placeholder="Planner" className="text-xs" /></div>
                                 </div>
-                                <h3 className={`text-xs font-bold mt-3 mb-2 uppercase ${isVpnMode ? 'text-gray-600' : 'text-slate-400'}`}>{isVpnMode ? 'Category Labels (VPN)' : 'Noms piliers (VPN)'}</h3>
+                                {!isVpnMode && (<>
+                                <h3 className={`text-xs font-bold mt-3 mb-2 uppercase text-slate-400`}>Noms piliers (VPN)</h3>
                                 <div className="grid grid-cols-2 gap-2">
                                     <div><label className={`text-xs mb-0.5 block ${mutedText}`}>Pro</label><Input value={data.settings.vpnLabels?.pro || ''} onChange={e => setSafeData(p => ({...p, settings: {...p.settings, vpnLabels: {...(p.settings.vpnLabels || {}), pro: e.target.value}}}))} placeholder="Work" className="text-xs" /></div>
                                     <div><label className={`text-xs mb-0.5 block ${mutedText}`}>SaaS</label><Input value={data.settings.vpnLabels?.saas || ''} onChange={e => setSafeData(p => ({...p, settings: {...p.settings, vpnLabels: {...(p.settings.vpnLabels || {}), saas: e.target.value}}}))} placeholder="Projects" className="text-xs" /></div>
                                     <div><label className={`text-xs mb-0.5 block ${mutedText}`}>Patri</label><Input value={data.settings.vpnLabels?.patri || ''} onChange={e => setSafeData(p => ({...p, settings: {...p.settings, vpnLabels: {...(p.settings.vpnLabels || {}), patri: e.target.value}}}))} placeholder="Admin" className="text-xs" /></div>
                                     <div><label className={`text-xs mb-0.5 block ${mutedText}`}>Vie</label><Input value={data.settings.vpnLabels?.vie || ''} onChange={e => setSafeData(p => ({...p, settings: {...p.settings, vpnLabels: {...(p.settings.vpnLabels || {}), vie: e.target.value}}}))} placeholder="Personal" className="text-xs" /></div>
+                                </div>
+                                </>)}
+
+                                <h3 className={`text-xs font-bold mt-3 mb-2 uppercase ${isVpnMode ? 'text-[#2563EB]' : 'text-slate-400'}`}>{isVpnMode ? 'VPN COLUMNS' : 'Colonnes VPN Bureau'}</h3>
+                                <div className="grid grid-cols-2 gap-2">
+                                    <div><label className={`text-xs mb-0.5 block ${mutedText}`}>Col 1</label><Input value={vpnCols.col1} onChange={e => setSafeData(p => ({...p, settings: {...p.settings, vpnColumns: {...vpnCols, col1: e.target.value}}}))} placeholder="Clients" className="text-xs" /></div>
+                                    <div><label className={`text-xs mb-0.5 block ${mutedText}`}>Col 2</label><Input value={vpnCols.col2} onChange={e => setSafeData(p => ({...p, settings: {...p.settings, vpnColumns: {...vpnCols, col2: e.target.value}}}))} placeholder="Formation" className="text-xs" /></div>
+                                    <div><label className={`text-xs mb-0.5 block ${mutedText}`}>Col 3</label><Input value={vpnCols.col3} onChange={e => setSafeData(p => ({...p, settings: {...p.settings, vpnColumns: {...vpnCols, col3: e.target.value}}}))} placeholder="Admin" className="text-xs" /></div>
+                                    <div><label className={`text-xs mb-0.5 block ${mutedText}`}>Col 4</label><Input value={vpnCols.col4} onChange={e => setSafeData(p => ({...p, settings: {...p.settings, vpnColumns: {...vpnCols, col4: e.target.value}}}))} placeholder="Meetings" className="text-xs" /></div>
                                 </div>
                             </div>
 

@@ -98,7 +98,7 @@ Analyse en français...
 
         try {
             const response = await ai.models.generateContent({
-                model: 'gemini-2.0-flash', // Utilisation du modèle Flash pour la rapidité
+                model: 'gemini-2.5-flash', // Utilisation du modèle Flash pour la rapidité
                 contents: { parts },
                 config: {
                     systemInstruction: systemPrompt,
@@ -141,7 +141,7 @@ FORMAT DE SORTIE REQUIS :
 
         try {
             const response = await ai.models.generateContent({
-                model: 'gemini-2.0-flash', // Pro pour le raisonnement complexe
+                model: 'gemini-2.5-flash', // Pro pour le raisonnement complexe
                 contents: action,
                 config: {
                     systemInstruction: systemPrompt
@@ -183,7 +183,7 @@ COMPORTEMENT :
         try {
             // Utilisation correcte de 'chats.create'
             const chatSession = ai.chats.create({
-                model: 'gemini-2.0-flash',
+                model: 'gemini-2.5-flash',
                 history: formattedHistory,
                 config: {
                     systemInstruction: systemPrompt

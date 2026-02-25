@@ -10,11 +10,12 @@ export default defineConfig(({ mode }) => {
   return {
     plugins: [react()],
     base: './', 
-    // On définit process.env pour que le code puisse lire les clés VITE_
+    // Only inject the AI key (needed at runtime for Gemini calls)
+    // GIST_ID and GIST_TOKEN are NOT injected — they live only in localStorage
     define: {
       'process.env.API_KEY': JSON.stringify(env.VITE_API_KEY),
-      'process.env.GIST_ID': JSON.stringify(env.VITE_GIST_ID),
-      'process.env.GIST_TOKEN': JSON.stringify(env.VITE_GIST_TOKEN)
+      'process.env.GIST_ID': JSON.stringify(''),
+      'process.env.GIST_TOKEN': JSON.stringify('')
     },
     build: {
       outDir: 'dist',

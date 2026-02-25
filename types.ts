@@ -15,6 +15,11 @@ export interface Task {
   todayStar: boolean;
   createdAt: string;
   completedAt?: string;
+  vpnColumn?: 1 | 2 | 3 | 4;
+  // Récurrence / Relance
+  recurrenceDays?: number;   // Intervalle en jours (7=hebdo, 14=2sem, 21=3sem, 35=5sem...)
+  nextDate?: string;         // Date prochaine échéance (ISO YYYY-MM-DD)
+  parentId?: number;         // ID de la tâche originale (pour tracer la chaîne)
 }
 
 export interface JournalEntry {
@@ -32,6 +37,8 @@ export interface ReviewData {
   win: string;
   fail: string;
   priority: string;
+  energy?: number;  // 1-5, score energie hebdo
+  focus?: number;   // 1-5, score focus hebdo
 }
 
 export interface DailyProgress {
@@ -50,6 +57,7 @@ export interface AgendaEvent {
   duration: number; // Minutes
   type: 'meeting' | 'work' | 'other';
   important: boolean;
+  vpnCreated?: boolean; // true if created while VPN mode was active
 }
 
 export interface Settings {
@@ -74,6 +82,12 @@ export interface Settings {
     saas?: string;
     patri?: string;
     vie?: string;
+  };
+  vpnColumns?: {
+    col1: string;
+    col2: string;
+    col3: string;
+    col4: string;
   };
 }
 
@@ -121,6 +135,7 @@ export interface AppData {
   context: string;
   agenda: AgendaEvent[];
   weeklyConfig: Record<number, DayConfig>;
+  dailyScores?: { date: string; score: number }[];
 }
 
 export interface Backup {

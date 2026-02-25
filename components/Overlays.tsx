@@ -1,9 +1,9 @@
 
 import React, { useState } from 'react';
-import { Task } from '../types';
+import { Task, Settings } from '../types';
 import { Icons } from './Icons';
 import { Button, Input } from './UI';
-import { playSoftBeep, getTaskDuration } from '../utils';
+import { playSoftBeep, getTaskDuration, sanitizeForOffice } from '../utils';
 
 // --- CORPORATE MASK (PANIC MODE) ---
 export const CorporateMask: React.FC<{ active: boolean }> = ({ active }) => {
@@ -113,7 +113,8 @@ export const FocusOverlay: React.FC<{
     onComplete: () => void;
     onNext: () => void;
     isOfficeMode?: boolean;
-}> = ({ task, active, elapsed, isRunning, onStart, onPause, onResume, onClose, onComplete, onNext, isOfficeMode = false }) => {
+    settings?: Settings;
+}> = ({ task, active, elapsed, isRunning, onStart, onPause, onResume, onClose, onComplete, onNext, isOfficeMode = false, settings }) => {
 
     const fmtTime = (s: number) => {
         const m = Math.floor(s / 60).toString().padStart(2, '0');
@@ -135,11 +136,11 @@ export const FocusOverlay: React.FC<{
             </button>
 
             <div className={`px-4 py-1.5 rounded-full border text-xs font-bold tracking-widest uppercase mb-8 ${isOfficeMode ? 'border-[#2563EB]/30 bg-[#2563EB]/10 text-[#2563EB]' : 'border-pro/20 bg-pro/10 text-pro'}`}>
-                {task.type}
+                {sanitizeForOffice(task.type, isOfficeMode, settings)}
             </div>
 
             <h1 className={`text-4xl md:text-5xl font-bold text-center max-w-3xl leading-tight mb-4 px-4 ${isOfficeMode ? 'text-gray-800' : 'text-white'}`}>
-                {task.text}
+                {sanitizeForOffice(task.text, isOfficeMode, settings)}
             </h1>
 
             {/* Countdown or elapsed */}
