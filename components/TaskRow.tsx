@@ -2,7 +2,7 @@
 import React from 'react';
 import { Task } from '../types';
 import { Icons } from './Icons';
-import { getThemeColor, ASSETS_CONFIG, sanitizeForOffice, getStreakCount } from '../utils';
+import { getThemeColor, ASSETS_CONFIG, sanitizeForOffice, getStreakCount, getSubtaskProgress } from '../utils';
 
 interface TaskRowProps {
     task: Task;
@@ -87,6 +87,21 @@ const TaskRow: React.FC<TaskRowProps> = ({ task, onToggle, onDelete, onStar, onF
                 >
                     {displayText}
                 </span>
+
+                {/* Subtask progress indicator */}
+                {(() => {
+                    const progress = getSubtaskProgress(task);
+                    if (!progress) return null;
+                    const pct = Math.round((progress.done / progress.total) * 100);
+                    return (
+                        <div className="flex items-center gap-1.5 ml-2 flex-shrink-0">
+                            <div className={`w-12 h-1 rounded-full overflow-hidden ${isOfficeMode ? 'bg-gray-200' : 'bg-white/10'}`}>
+                                <div className={`h-full rounded-full transition-all ${pct === 100 ? (isOfficeMode ? 'bg-green-500' : 'bg-saas') : (isOfficeMode ? 'bg-[#2563EB]' : 'bg-pro')}`} style={{ width: `${pct}%` }} />
+                            </div>
+                            <span className={`text-[10px] font-mono ${isOfficeMode ? 'text-gray-400' : 'text-slate-500'}`}>{progress.done}/{progress.total}</span>
+                        </div>
+                    );
+                })()}
 
                 {/* Next date indicator for recurring tasks */}
                 {task.nextDate && task.recurrenceDays && !task.done && (

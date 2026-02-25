@@ -198,6 +198,40 @@ COMPORTEMENT :
         }
     },
 
+    // 4. MORNING BRIEF (Proactive AI — auto-triggered at first load)
+    async morningBrief(tasks: { text: string; type: string; todayStar: boolean; done: boolean; nextDate?: string; createdAt: string }[], agenda: { title: string; time: string; date: string; important: boolean }[], todayStr: string, isVpn: boolean) {
+        const overdue = tasks.filter(t => !t.done && t.nextDate && t.nextDate < todayStr).slice(0, 5);
+        const starred = tasks.filter(t => t.todayStar && !t.done).slice(0, 5);
+        const todayEvents = agenda.filter(e => e.date === todayStr);
+        const stale = tasks.filter(t => !t.done && t.createdAt && (Date.now() - new Date(t.createdAt).getTime()) > 14 * 86400000).slice(0, 3);
+
+        const prompt = isVpn
+            ? `You are a productivity assistant. Give a 3-line daily briefing in English based on this data. Be direct and actionable.
+Starred tasks: ${starred.map(t => t.text).join(', ') || 'None'}
+Today's meetings: ${todayEvents.map(e => `${e.time} ${e.title}`).join(', ') || 'None'}
+Overdue tasks: ${overdue.map(t => t.text).join(', ') || 'None'}
+Old tasks (>14 days): ${stale.map(t => t.text).join(', ') || 'None'}
+Reply with exactly 3 short lines. No markdown.`
+            : `Tu es un coach productivité. Donne un briefing matinal de 3 lignes max basé sur ces données. Sois direct et actionnable.
+Tâches starred: ${starred.map(t => t.text).join(', ') || 'Aucune'}
+RDV aujourd'hui: ${todayEvents.map(e => `${e.time} ${e.title}`).join(', ') || 'Aucun'}
+Tâches en retard: ${overdue.map(t => t.text).join(', ') || 'Aucune'}
+Tâches anciennes (>14j): ${stale.map(t => t.text).join(', ') || 'Aucune'}
+Réponds avec exactement 3 lignes courtes. Pas de markdown.`;
+
+        try {
+            const response = await ai.models.generateContent({
+                model: 'gemini-2.5-flash',
+                contents: prompt,
+                config: { temperature: 0.1 }
+            });
+            return response.text || '';
+        } catch (error) {
+            console.error('Morning Brief Error:', error);
+            return '';
+        }
+    },
+
     // PARSEUR ROBUSTE (Avec Fallback JSON)
     parseResponse(text: string) {
         if (!text) return { analysis: '', tasks: [], verdict: null, recommendation: null, raw: '' };

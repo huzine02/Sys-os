@@ -20,6 +20,8 @@ export interface Task {
   recurrenceDays?: number;   // Intervalle en jours (7=hebdo, 14=2sem, 21=3sem, 35=5sem...)
   nextDate?: string;         // Date prochaine échéance (ISO YYYY-MM-DD)
   parentId?: number;         // ID de la tâche originale (pour tracer la chaîne)
+  // Sous-tâches
+  subtasks?: { text: string; done: boolean }[];
 }
 
 export interface JournalEntry {

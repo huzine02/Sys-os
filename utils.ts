@@ -123,6 +123,21 @@ export const getDeepWorkCount = (tasks: Task[], todayStr: string, vpnFilter: (t:
     }).length;
 };
 
+export const getSubtaskProgress = (task: Task): { done: number; total: number } | null => {
+    if (!task.subtasks || task.subtasks.length === 0) return null;
+    return { done: task.subtasks.filter(s => s.done).length, total: task.subtasks.length };
+};
+
+export const getStaleTasks = (tasks: Task[], daysThreshold: number = 14): { id: number; text: string; daysSince: number }[] => {
+    const now = Date.now();
+    return tasks
+        .filter(t => !t.done && t.createdAt)
+        .map(t => ({ id: t.id, text: t.text, daysSince: Math.floor((now - new Date(t.createdAt).getTime()) / 86400000) }))
+        .filter(t => t.daysSince >= daysThreshold)
+        .sort((a, b) => b.daysSince - a.daysSince)
+        .slice(0, 5);
+};
+
 export const getScoreColor = (score: number, isVpnMode: boolean): string => {
     if (isVpnMode) return score > 80 ? 'text-green-600' : score > 50 ? 'text-orange-600' : 'text-red-600';
     return score > 80 ? 'text-saas' : score > 50 ? 'text-gold' : 'text-alert';

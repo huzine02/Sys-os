@@ -14,8 +14,10 @@ import {
     requestNotificationPermission, sendSystemNotification,
     playEyeCareBeep, playBreakerBeep, playTaskTimerBeep, playAdhanBeep,
     playAgendaChime,
-    getDailyScore, getDeepWorkCount, getScoreColor
+    getDailyScore, getDeepWorkCount, getScoreColor,
+    getSubtaskProgress, getStaleTasks
 } from './utils';
+import { aiService } from './services/ai';
 import { Button, Input, Card } from './components/UI';
 import { Icons } from './components/Icons';
 import TaskRow from './components/TaskRow';
@@ -255,6 +257,13 @@ export default function App() {
     const [newAgendaDuration, setNewAgendaDuration] = useState("30");
     const [newAgendaImportant, setNewAgendaImportant] = useState(false);
     const [newJournalEntry, setNewJournalEntry] = useState("");
+    // Subtask expand
+    const [expandedTaskId, setExpandedTaskId] = useState<number | null>(null);
+    const [newSubtaskText, setNewSubtaskText] = useState("");
+    // Morning brief (proactive AI)
+    const [morningBrief, setMorningBrief] = useState<string | null>(null);
+    const [morningBriefDismissed, setMorningBriefDismissed] = useState(false);
+    const morningBriefFiredRef = useRef(false);
 
     // --- HELPERS ---
     const getDayConfig = (dayIndex: number): DayConfig => (data.weeklyConfig && data.weeklyConfig[dayIndex]) ? data.weeklyConfig[dayIndex] : (DAY_CONFIGS[dayIndex] || DAY_CONFIGS[1]);
@@ -317,6 +326,38 @@ export default function App() {
     const updateTaskSafe = (id: number, updates: Partial<Task>) => setSafeData(prev => ({...prev, tasks: prev.tasks.map(t => t.id === id ? { ...t, ...updates } : t)}));
     const deleteTaskSafe = (id: number) => setSafeData(prev => ({...prev, tasks: prev.tasks.filter(t => t.id !== id)}));
     const toggleTodayStar = (id: number) => { const t = data.tasks.find(tk => tk.id === id); if (t) updateTaskSafe(id, { todayStar: !t.todayStar }); };
+
+    // --- SUBTASK HANDLERS ---
+    const toggleSubtask = (taskId: number, subIdx: number) => setSafeData(prev => ({
+        ...prev,
+        tasks: prev.tasks.map(t => {
+            if (t.id !== taskId || !t.subtasks) return t;
+            const updated = t.subtasks.map((s, i) => i === subIdx ? { ...s, done: !s.done } : s);
+            return { ...t, subtasks: updated };
+        })
+    }));
+    const addSubtask = (taskId: number, text: string) => {
+        if (!text.trim()) return;
+        setSafeData(prev => ({
+            ...prev,
+            tasks: prev.tasks.map(t => t.id !== taskId ? t : { ...t, subtasks: [...(t.subtasks || []), { text: text.trim(), done: false }] })
+        }));
+        setNewSubtaskText("");
+    };
+    const removeSubtask = (taskId: number, subIdx: number) => setSafeData(prev => ({
+        ...prev,
+        tasks: prev.tasks.map(t => {
+            if (t.id !== taskId || !t.subtasks) return t;
+            return { ...t, subtasks: t.subtasks.filter((_, i) => i !== subIdx) };
+        })
+    }));
+    const handleTaskFocus = useCallback((task: Task) => {
+        if (task.subtasks && task.subtasks.length > 0) {
+            setExpandedTaskId(prev => prev === task.id ? null : task.id);
+        } else {
+            startInlineTimer(task);
+        }
+    }, [startInlineTimer]);
 
     const getBudgetStatus = (type: 'pro' | 'saas' | 'patri' | 'vie') => {
         const budget = dayConfig.budgets[type] || 0;
@@ -403,6 +444,19 @@ export default function App() {
         window.addEventListener('keydown', hk);
         return () => window.removeEventListener('keydown', hk);
     }, []); // eslint-disable-line
+
+    // --- MORNING BRIEF (Proactive AI) ---
+    useEffect(() => {
+        if (morningBriefFiredRef.current || !data.settings.gistToken || isVpnMode) return;
+        const hour = new Date().getHours();
+        if (hour >= 14) return; // Only before 2pm
+        morningBriefFiredRef.current = true;
+        const simpleTasks = data.tasks.filter(t => !t.done).map(t => ({ text: t.text, type: t.type, todayStar: t.todayStar, done: t.done, nextDate: t.nextDate, createdAt: t.createdAt }));
+        const simpleAgenda = (data.agenda || []).map(e => ({ title: e.title, time: e.time, date: e.date, important: e.important }));
+        aiService.morningBrief(simpleTasks, simpleAgenda, todayStr, false).then(brief => {
+            if (brief) setMorningBrief(brief);
+        }).catch(() => {});
+    }, [data.settings.gistToken]); // eslint-disable-line
 
     // --- SYNC POLLING (5s) ---
     useEffect(() => {
@@ -715,6 +769,7 @@ export default function App() {
     const dailyScore = getDailyScore(data.tasks, todayStr, vpnFilter);
     const deepWorkCount = getDeepWorkCount(data.tasks, todayStr, vpnFilter);
     const ancreAlert = !isVpnMode && new Date().getHours() >= 12 && top3.length > 0 && !top3[0].done;
+    const staleTasks = getStaleTasks(data.tasks.filter(vpnFilter));
     const copyMobileLink = () => { navigator.clipboard.writeText(`${window.location.origin}${window.location.pathname}?token=${data.settings.gistToken}&id=${data.settings.gistId}`); alert("Lien copié !"); };
 
     // Focus timer controls
@@ -736,6 +791,47 @@ export default function App() {
         if (timerTask) toggleTaskSafe(timerTask.id);
         stopInlineTimer();
     }, [timerTask, stopInlineTimer]);
+
+    // --- TASK ROW WITH SUBTASK EXPAND ---
+    const renderTaskWithSubs = (t: Task, opts: { showTypeDot?: boolean; isBlurred?: boolean; isOffice: boolean }) => (
+        <React.Fragment key={t.id}>
+            <TaskRow task={t} onToggle={toggleTaskSafe} onDelete={deleteTaskSafe} onStar={toggleTodayStar} onFocus={() => handleTaskFocus(t)} isBlurred={opts.isBlurred || false} showTypeDot={opts.showTypeDot || false} isOfficeMode={opts.isOffice} allTasks={data.tasks} />
+            {renderSubtaskExpand(t)}
+        </React.Fragment>
+    );
+
+    // --- SUBTASK INLINE EXPAND ---
+    const renderSubtaskExpand = (task: Task) => {
+        if (expandedTaskId !== task.id) return null;
+        const subs = task.subtasks || [];
+        const progress = getSubtaskProgress(task);
+        const allDone = progress && progress.done === progress.total && progress.total > 0;
+        return (
+            <div className={`ml-7 mr-2 mb-2 p-3 rounded-lg border animate-slide-up ${isOfficeSanitization ? 'bg-gray-50 border-gray-200' : 'bg-white/[0.03] border-white/[0.08]'}`}>
+                {subs.length > 0 && (
+                    <div className="space-y-1.5 mb-3">
+                        {subs.map((sub, idx) => (
+                            <div key={idx} className="flex items-center gap-2 group/sub">
+                                <button onClick={() => toggleSubtask(task.id, idx)} className={`w-4 h-4 rounded border flex items-center justify-center flex-shrink-0 transition-all ${sub.done ? (isOfficeSanitization ? 'bg-[#2563EB] border-[#2563EB] text-white' : 'bg-saas border-saas text-white') : (isOfficeSanitization ? 'border-gray-300 hover:border-gray-400' : 'border-white/20 hover:border-white/40')}`}>
+                                    {sub.done && <Icons.Check size={10} strokeWidth={4} />}
+                                </button>
+                                <span className={`text-xs flex-1 ${sub.done ? (isOfficeSanitization ? 'line-through text-gray-400' : 'line-through text-slate-600') : (isOfficeSanitization ? 'text-gray-700' : 'text-slate-300')}`}>{sub.text}</span>
+                                <button onClick={() => removeSubtask(task.id, idx)} className="opacity-0 group-hover/sub:opacity-100 text-slate-500 hover:text-red-400 transition-opacity"><Icons.X size={12} /></button>
+                            </div>
+                        ))}
+                    </div>
+                )}
+                <div className="flex items-center gap-2">
+                    <input type="text" value={newSubtaskText} onChange={e => setNewSubtaskText(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') { addSubtask(task.id, newSubtaskText); } }} placeholder={isOfficeSanitization ? 'Add step...' : 'Ajouter étape...'} className={`flex-1 text-xs px-2 py-1.5 rounded border focus:outline-none ${isOfficeSanitization ? 'bg-white border-gray-200 text-gray-700 focus:border-blue-300' : 'bg-white/[0.03] border-white/10 text-slate-300 focus:border-white/20'}`} />
+                    <button onClick={() => addSubtask(task.id, newSubtaskText)} className={`px-2 py-1.5 rounded text-xs font-bold ${isOfficeSanitization ? 'bg-[#2563EB] text-white' : 'bg-pro/20 text-pro hover:bg-pro/30'}`}><Icons.Plus size={12} /></button>
+                </div>
+                <div className="flex items-center gap-2 mt-2">
+                    <button onClick={() => startInlineTimer(task)} className={`flex items-center gap-1 px-2.5 py-1 rounded text-xs font-bold ${isOfficeSanitization ? 'bg-blue-50 text-[#2563EB] hover:bg-blue-100' : 'bg-white/5 text-slate-300 hover:bg-white/10'}`}><Icons.Play size={11} fill="currentColor" /> Timer</button>
+                    {allDone && <button onClick={() => toggleTaskSafe(task.id)} className={`flex items-center gap-1 px-2.5 py-1 rounded text-xs font-bold ${isOfficeSanitization ? 'bg-green-50 text-green-600 hover:bg-green-100' : 'bg-saas/10 text-saas hover:bg-saas/20'}`}><Icons.Check size={11} strokeWidth={3} /> {isOfficeSanitization ? 'Complete' : 'Terminer'}</button>}
+                </div>
+            </div>
+        );
+    };
 
     // --- LOGIN GATE ---
     if (!data.settings.gistId || !data.settings.gistToken) {
@@ -960,6 +1056,38 @@ export default function App() {
                                     {!isVpnMode && <Button variant="outline" onClick={() => setShowShutdown(true)} className="h-8 px-3 text-xs">Shutdown</Button>}
                                 </div>
 
+                                {/* MORNING BRIEF BANNER */}
+                                {morningBrief && !morningBriefDismissed && !isVpnMode && (
+                                    <div className="mb-4 p-3 rounded-xl border border-blue-500/20 bg-blue-500/5 animate-slide-up">
+                                        <div className="flex items-start justify-between gap-3">
+                                            <div className="flex items-start gap-2 flex-1 min-w-0">
+                                                <Icons.Brain size={16} className="text-blue-400 flex-shrink-0 mt-0.5" />
+                                                <div className="text-xs text-slate-300 whitespace-pre-line leading-relaxed">{morningBrief}</div>
+                                            </div>
+                                            <button onClick={() => setMorningBriefDismissed(true)} className="text-slate-500 hover:text-slate-300 flex-shrink-0"><Icons.X size={14} /></button>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* STALE TASKS ALERT */}
+                                {staleTasks.length > 0 && (
+                                    <div className={`mb-4 p-3 rounded-xl border ${isVpnMode ? 'border-orange-200 bg-orange-50' : 'border-amber-500/20 bg-amber-500/5'}`}>
+                                        <div className={`text-xs font-bold uppercase mb-2 flex items-center gap-1.5 ${isVpnMode ? 'text-orange-600' : 'text-amber-400'}`}><Icons.Clock size={12} /> {isVpnMode ? 'STALE TASKS' : 'TACHES OUBLIEES'}</div>
+                                        <div className="space-y-1.5">
+                                            {staleTasks.map(st => (
+                                                <div key={st.id} className={`flex items-center justify-between gap-2 text-xs ${isVpnMode ? 'text-gray-600' : 'text-slate-400'}`}>
+                                                    <span className="truncate flex-1">{sanitizeForOffice(st.text, isOfficeSanitization, data.settings)}</span>
+                                                    <span className={`flex-shrink-0 font-mono ${isVpnMode ? 'text-orange-500' : 'text-amber-500'}`}>{st.daysSince}{isVpnMode ? 'd' : 'j'}</span>
+                                                    <div className="flex gap-1 flex-shrink-0">
+                                                        <button onClick={() => toggleTodayStar(st.id)} className={`p-1 rounded ${isVpnMode ? 'hover:bg-orange-100' : 'hover:bg-white/10'}`} title={isVpnMode ? 'Star' : 'Star'}><Icons.Star size={12} /></button>
+                                                        <button onClick={() => deleteTaskSafe(st.id)} className={`p-1 rounded ${isVpnMode ? 'hover:bg-red-100' : 'hover:bg-red-500/10'}`} title={isVpnMode ? 'Delete' : 'Supprimer'}><Icons.Trash2 size={12} /></button>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+
                                 {/* ROW 1: ANCRE (2/3) + STATS (1/3) */}
                                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
                                     {/* ANCRE — Hero Card */}
@@ -1078,11 +1206,11 @@ export default function App() {
                                                 <div className="flex-1 overflow-y-auto pr-0.5 space-y-0">
                                                     {todayTasks.length > 0 && (<div className="mb-2">
                                                         <div className="flex items-center gap-1.5 mb-1 px-1 text-orange-600"><Icons.Star size={12} fill="currentColor"/><span className="text-xs font-bold uppercase tracking-wider">TODAY</span></div>
-                                                        {todayTasks.map(t => (<TaskRow key={t.id} task={t} onToggle={toggleTaskSafe} onDelete={deleteTaskSafe} onStar={toggleTodayStar} onFocus={() => startInlineTimer(t)} isBlurred={false} showTypeDot={false} isOfficeMode={true} allTasks={data.tasks} />))}
+                                                        {todayTasks.map(t => renderTaskWithSubs(t, { isOffice: true }))}
                                                     </div>)}
                                                     {backlogTasks.length > 0 && (<div className={todayTasks.length > 0 ? 'pt-2 border-t border-gray-100' : ''}>
                                                         <div className="flex items-center gap-1.5 mb-1 px-1 text-gray-400"><span className="text-xs font-bold uppercase tracking-wider">BACKLOG</span><span className="text-xs opacity-50">{backlogTasks.length}</span></div>
-                                                        {backlogTasks.map(t => (<TaskRow key={t.id} task={t} onToggle={toggleTaskSafe} onDelete={deleteTaskSafe} onStar={toggleTodayStar} onFocus={() => startInlineTimer(t)} isBlurred={false} showTypeDot={false} isOfficeMode={true} allTasks={data.tasks} />))}
+                                                        {backlogTasks.map(t => renderTaskWithSubs(t, { isOffice: true }))}
                                                     </div>)}
                                                     <button onClick={() => { setModalDefaultType('pro'); setShowTaskModal(true); setVpnModalColumn(colNum); }} className="w-full py-2.5 mt-2 rounded-lg border-2 border-dashed text-xs font-semibold flex items-center justify-center gap-1.5 transition-all border-gray-200 text-gray-400 hover:border-gray-300 hover:text-gray-600"><Icons.Plus size={14}/> Add</button>
                                                 </div>
@@ -1115,14 +1243,14 @@ export default function App() {
                                                  <div className="flex-1 overflow-y-auto pr-0.5 space-y-0">
                                                     {todayTasks.length > 0 && (<div className="mb-2">
                                                         <div className="flex items-center gap-1.5 mb-1 px-1 text-gold"><Icons.Star size={12} fill="currentColor"/><span className="text-xs font-bold uppercase tracking-wider">TODAY</span></div>
-                                                        {type === 'patri' ? (<div className="space-y-1">{todayTasks.map(t => (<TaskRow key={t.id} task={t} onToggle={toggleTaskSafe} onDelete={deleteTaskSafe} onStar={toggleTodayStar} onFocus={() => startInlineTimer(t)} isBlurred={false} showTypeDot={false} isOfficeMode={false} allTasks={data.tasks} />))}</div>) : todayTasks.map(t => (<TaskRow key={t.id} task={t} onToggle={toggleTaskSafe} onDelete={deleteTaskSafe} onStar={toggleTodayStar} onFocus={() => startInlineTimer(t)} isBlurred={false} showTypeDot={false} isOfficeMode={false} allTasks={data.tasks} />))}
+                                                        {type === 'patri' ? (<div className="space-y-1">{todayTasks.map(t => renderTaskWithSubs(t, { isOffice: false }))}</div>) : todayTasks.map(t => renderTaskWithSubs(t, { isOffice: false }))}
                                                     </div>)}
                                                     {backlogTasks.length > 0 && (<div className={todayTasks.length > 0 ? 'pt-2 border-t border-white/5' : ''}>
                                                         <div className="flex items-center gap-1.5 mb-1 px-1 text-slate-600"><span className="text-xs font-bold uppercase tracking-wider">BACKLOG</span><span className="text-xs opacity-50">{backlogTasks.length}</span></div>
                                                         {type === 'patri' ? (<div className="space-y-2">
-                                                            {ASSETS_KEYS.map(sub => { const st = backlogTasks.filter(t => t.type === sub); if(st.length === 0) return null; return (<div key={sub} className="rounded p-1.5 border bg-white/[0.02] border-white/[0.04]"><div className="text-xs font-bold uppercase mb-1 flex justify-between text-patri">{sub}<span className="opacity-50">{st.length}</span></div>{st.map(t => (<TaskRow key={t.id} task={t} onToggle={toggleTaskSafe} onDelete={deleteTaskSafe} onStar={toggleTodayStar} onFocus={() => startInlineTimer(t)} isBlurred={false} showTypeDot={false} isOfficeMode={false} allTasks={data.tasks} />))}</div>); })}
-                                                            {backlogTasks.filter(t => t.type === 'patri').length > 0 && (<div className="rounded p-1.5 border bg-white/[0.02] border-white/[0.04]"><div className="text-xs font-bold uppercase mb-1 text-slate-400">Général</div>{backlogTasks.filter(t => t.type === 'patri').map(t => (<TaskRow key={t.id} task={t} onToggle={toggleTaskSafe} onDelete={deleteTaskSafe} onStar={toggleTodayStar} onFocus={() => startInlineTimer(t)} isBlurred={false} showTypeDot={false} isOfficeMode={false} allTasks={data.tasks} />))}</div>)}
-                                                        </div>) : backlogTasks.map(t => (<TaskRow key={t.id} task={t} onToggle={toggleTaskSafe} onDelete={deleteTaskSafe} onStar={toggleTodayStar} onFocus={() => startInlineTimer(t)} isBlurred={false} showTypeDot={false} isOfficeMode={false} allTasks={data.tasks} />))}
+                                                            {ASSETS_KEYS.map(sub => { const st = backlogTasks.filter(t => t.type === sub); if(st.length === 0) return null; return (<div key={sub} className="rounded p-1.5 border bg-white/[0.02] border-white/[0.04]"><div className="text-xs font-bold uppercase mb-1 flex justify-between text-patri">{sub}<span className="opacity-50">{st.length}</span></div>{st.map(t => renderTaskWithSubs(t, { isOffice: false }))}</div>); })}
+                                                            {backlogTasks.filter(t => t.type === 'patri').length > 0 && (<div className="rounded p-1.5 border bg-white/[0.02] border-white/[0.04]"><div className="text-xs font-bold uppercase mb-1 text-slate-400">Général</div>{backlogTasks.filter(t => t.type === 'patri').map(t => renderTaskWithSubs(t, { isOffice: false }))}</div>)}
+                                                        </div>) : backlogTasks.map(t => renderTaskWithSubs(t, { isOffice: false }))}
                                                     </div>)}
                                                     <button onClick={() => { setModalDefaultType(type as TaskType); setShowTaskModal(true); }} className="w-full py-2.5 mt-2 rounded-lg border-2 border-dashed text-xs font-semibold flex items-center justify-center gap-1.5 transition-all border-white/10 text-slate-500 hover:border-white/20 hover:text-slate-300 hover:bg-white/[0.02]"><Icons.Plus size={14}/> Ajouter</button>
                                                  </div>
@@ -1139,7 +1267,7 @@ export default function App() {
                                 <h2 className={`text-lg font-bold uppercase ${isVpnMode ? 'text-[#2563EB]' : ''}`}>{sanitizeForOffice(currentView, isOfficeSanitization, data.settings)}</h2>
                                 <div className={getCardClass("p-3 flex flex-col min-h-[400px] max-h-[calc(100vh-200px)]")}>
                                      <div className="flex-1 overflow-y-auto pr-1">
-                                        {currentView === 'patri' ? (<div className="space-y-3">{[...ASSETS_KEYS, 'patri' as TaskType].map(sub => { const st = data.tasks.filter(t => t.type === sub && !t.done); return (<div key={sub} className="mb-2"><h3 className={`text-xs font-bold uppercase mb-1.5 border-b pb-1 ${isVpnMode ? 'text-gray-600 border-gray-200' : 'text-patri border-white/10'}`}>{sub === 'patri' ? 'Général' : sanitizeForOffice(sub, isOfficeSanitization, data.settings)}</h3>{st.map(t => (<TaskRow key={t.id} task={t} onToggle={toggleTaskSafe} onDelete={deleteTaskSafe} onStar={toggleTodayStar} onFocus={() => startInlineTimer(t)} isBlurred={false} showTypeDot={false} isOfficeMode={isOfficeSanitization} />))}<Button variant="ghost" className="mt-1 text-xs" onClick={() => { setModalDefaultType(sub as TaskType); setShowTaskModal(true); }}>+</Button></div>); })}</div>) : (<>{data.tasks.filter(t => t.type === currentView && !t.done).map(t => (<TaskRow key={t.id} task={t} onToggle={toggleTaskSafe} onDelete={deleteTaskSafe} onStar={toggleTodayStar} onFocus={() => startInlineTimer(t)} isBlurred={false} showTypeDot={false} isOfficeMode={isOfficeSanitization} />))}<Button variant="ghost" className="mt-2 text-xs" onClick={() => { setModalDefaultType(currentView as TaskType); setShowTaskModal(true); }}>+</Button></>)}
+                                        {currentView === 'patri' ? (<div className="space-y-3">{[...ASSETS_KEYS, 'patri' as TaskType].map(sub => { const st = data.tasks.filter(t => t.type === sub && !t.done); return (<div key={sub} className="mb-2"><h3 className={`text-xs font-bold uppercase mb-1.5 border-b pb-1 ${isVpnMode ? 'text-gray-600 border-gray-200' : 'text-patri border-white/10'}`}>{sub === 'patri' ? 'Général' : sanitizeForOffice(sub, isOfficeSanitization, data.settings)}</h3>{st.map(t => renderTaskWithSubs(t, { isOffice: isOfficeSanitization }))}<Button variant="ghost" className="mt-1 text-xs" onClick={() => { setModalDefaultType(sub as TaskType); setShowTaskModal(true); }}>+</Button></div>); })}</div>) : (<>{data.tasks.filter(t => t.type === currentView && !t.done).map(t => renderTaskWithSubs(t, { isOffice: isOfficeSanitization }))}<Button variant="ghost" className="mt-2 text-xs" onClick={() => { setModalDefaultType(currentView as TaskType); setShowTaskModal(true); }}>+</Button></>)}
                                      </div>
                                 </div>
                             </div>
