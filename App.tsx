@@ -351,14 +351,6 @@ export default function App() {
             return { ...t, subtasks: t.subtasks.filter((_, i) => i !== subIdx) };
         })
     }));
-    const handleTaskFocus = useCallback((task: Task) => {
-        if (task.subtasks && task.subtasks.length > 0) {
-            setExpandedTaskId(prev => prev === task.id ? null : task.id);
-        } else {
-            startInlineTimer(task);
-        }
-    }, [startInlineTimer]);
-
     const getBudgetStatus = (type: 'pro' | 'saas' | 'patri' | 'vie') => {
         const budget = dayConfig.budgets[type] || 0;
         const consumed = calculateConsumedBudget(data.tasks, data.agenda, type, todayStr);
@@ -791,6 +783,15 @@ export default function App() {
         if (timerTask) toggleTaskSafe(timerTask.id);
         stopInlineTimer();
     }, [timerTask, stopInlineTimer]);
+
+    // Task click: expand subtasks or start timer
+    const handleTaskFocus = useCallback((task: Task) => {
+        if (task.subtasks && task.subtasks.length > 0) {
+            setExpandedTaskId(prev => prev === task.id ? null : task.id);
+        } else {
+            startInlineTimer(task);
+        }
+    }, [startInlineTimer]);
 
     // --- TASK ROW WITH SUBTASK EXPAND ---
     const renderTaskWithSubs = (t: Task, opts: { showTypeDot?: boolean; isBlurred?: boolean; isOffice: boolean }) => (
