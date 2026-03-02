@@ -264,6 +264,8 @@ export default function App() {
     const [morningBrief, setMorningBrief] = useState<string | null>(null);
     const [morningBriefDismissed, setMorningBriefDismissed] = useState(false);
     const morningBriefFiredRef = useRef(false);
+    // Sync guard: prevent push before first pull completes (avoids wiping Gist with empty data)
+    const firstPullDoneRef = useRef(false);
 
     // --- HELPERS ---
     const getDayConfig = (dayIndex: number): DayConfig => (data.weeklyConfig && data.weeklyConfig[dayIndex]) ? data.weeklyConfig[dayIndex] : (DAY_CONFIGS[dayIndex] || DAY_CONFIGS[1]);
@@ -393,6 +395,7 @@ export default function App() {
             const json = await res.json();
             const file = json.files['sys_data.json'] || json.files['huzine_db.json'];
             if (!file?.content) return;
+            firstPullDoneRef.current = true; // Gist checked — safe to push from now on
             const remote = JSON.parse(file.content) as AppData;
             if (remote.updatedBy === SESSION_ID) return;
             if (remote.lastSynced <= (c.lastSynced || 0)) return;
@@ -459,11 +462,15 @@ export default function App() {
         return () => clearInterval(iv);
     }, [data.settings.gistId, data.settings.gistToken, data.settings.vpnMode, pullFromGist]);
 
-    // --- PUSH ON CHANGE (debounced) ---
+    // --- PUSH ON CHANGE (debounced) — guarded: no push until first pull confirms Gist state ---
     useEffect(() => {
         if (data === INITIAL_DATA || data.settings.vpnMode) return;
+        // GUARD: Don't push or snapshot until we've confirmed Gist state via first pull
+        if (!firstPullDoneRef.current && data.tasks.length === 0) return;
         saveSnapshot(data);
         if (data.settings.gistId && data.settings.gistToken && data.updatedBy === SESSION_ID) {
+            // Extra safety: never push empty data to Gist
+            if (data.tasks.length === 0) { log("[PUSH] Blocked — 0 tasks, refusing to overwrite Gist."); return; }
             if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
             setSyncStatus('pending');
             syncTimeoutRef.current = setTimeout(() => { syncToGist(data, data.settings.gistToken, data.settings.gistId); }, 1500);
@@ -475,7 +482,8 @@ export default function App() {
         const onUnload = () => {
             const d = dataRef.current;
             try { localStorage.setItem('sys_diag_cache', encryptData(d)); } catch(e) {}
-            if (d.settings.gistId && d.settings.gistToken && !d.settings.vpnMode) {
+            // Guard: never push empty data to Gist on unload
+            if (d.settings.gistId && d.settings.gistToken && !d.settings.vpnMode && d.tasks.length > 0 && firstPullDoneRef.current) {
                 const safe = { ...d, settings: { ...d.settings, gistToken: "", gistId: "" } };
                 const blob = new Blob([JSON.stringify({ files: { 'sys_data.json': { content: JSON.stringify(safe, null, 2) } } })], { type: 'application/json' });
                 navigator.sendBeacon?.(`https://api.github.com/gists/${d.settings.gistId}`, blob);

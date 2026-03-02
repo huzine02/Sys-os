@@ -490,6 +490,8 @@ export const sendSystemNotification = (title: string, body: string) => {
 
 export const saveSnapshot = (data: AppData, force: boolean = false) => {
     try {
+        // Never save a snapshot with 0 tasks — likely a race condition / empty state
+        if (!data.tasks || data.tasks.length === 0) return;
         const backups = getBackups();
         const now = Date.now();
         if (!force && backups.length > 0) {
