@@ -388,7 +388,7 @@ export default function App() {
 
     const pullFromGist = useCallback(async () => {
         const c = dataRef.current;
-        if (!c.settings.gistToken || !c.settings.gistId || c.settings.vpnMode || document.hidden) return;
+        if (!c.settings.gistToken || !c.settings.gistId || document.hidden) return;
         try {
             const res = await fetch(`https://api.github.com/gists/${c.settings.gistId}?ts=${Date.now()}`, { headers: { 'Authorization': `token ${c.settings.gistToken}` }, cache: 'no-store' });
             if (!res.ok) return;
@@ -456,15 +456,15 @@ export default function App() {
     // --- SYNC POLLING (5s) ---
     useEffect(() => {
         const { gistToken, gistId } = data.settings;
-        if (!gistToken || !gistId || data.settings.vpnMode) return;
+        if (!gistToken || !gistId) return;
         pullFromGist();
         const iv = setInterval(pullFromGist, 5000);
         return () => clearInterval(iv);
-    }, [data.settings.gistId, data.settings.gistToken, data.settings.vpnMode, pullFromGist]);
+    }, [data.settings.gistId, data.settings.gistToken, pullFromGist]);
 
     // --- PUSH ON CHANGE (debounced) — guarded: no push until first pull confirms Gist state ---
     useEffect(() => {
-        if (data === INITIAL_DATA || data.settings.vpnMode) return;
+        if (data === INITIAL_DATA) return;
         // GUARD: Don't push or snapshot until we've confirmed Gist state via first pull
         if (!firstPullDoneRef.current && data.tasks.length === 0) return;
         saveSnapshot(data);
@@ -483,7 +483,7 @@ export default function App() {
             const d = dataRef.current;
             try { localStorage.setItem('sys_diag_cache', encryptData(d)); } catch(e) {}
             // Guard: never push empty data to Gist on unload
-            if (d.settings.gistId && d.settings.gistToken && !d.settings.vpnMode && d.tasks.length > 0 && firstPullDoneRef.current) {
+            if (d.settings.gistId && d.settings.gistToken && d.tasks.length > 0 && firstPullDoneRef.current) {
                 const safe = { ...d, settings: { ...d.settings, gistToken: "", gistId: "" } };
                 const blob = new Blob([JSON.stringify({ files: { 'sys_data.json': { content: JSON.stringify(safe, null, 2) } } })], { type: 'application/json' });
                 navigator.sendBeacon?.(`https://api.github.com/gists/${d.settings.gistId}`, blob);
