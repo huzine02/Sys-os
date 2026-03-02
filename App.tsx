@@ -388,7 +388,7 @@ export default function App() {
 
     const pullFromGist = useCallback(async () => {
         const c = dataRef.current;
-        if (!c.settings.gistToken || !c.settings.gistId || document.hidden) return;
+        if (!c.settings.gistToken || !c.settings.gistId || c.settings.vpnMode || document.hidden) return;
         try {
             const res = await fetch(`https://api.github.com/gists/${c.settings.gistId}?ts=${Date.now()}`, { headers: { 'Authorization': `token ${c.settings.gistToken}` }, cache: 'no-store' });
             if (!res.ok) return;
@@ -456,15 +456,15 @@ export default function App() {
     // --- SYNC POLLING (5s) ---
     useEffect(() => {
         const { gistToken, gistId } = data.settings;
-        if (!gistToken || !gistId) return;
+        if (!gistToken || !gistId || data.settings.vpnMode) return;
         pullFromGist();
         const iv = setInterval(pullFromGist, 5000);
         return () => clearInterval(iv);
-    }, [data.settings.gistId, data.settings.gistToken, pullFromGist]);
+    }, [data.settings.gistId, data.settings.gistToken, data.settings.vpnMode, pullFromGist]);
 
     // --- PUSH ON CHANGE (debounced) — guarded: no push until first pull confirms Gist state ---
     useEffect(() => {
-        if (data === INITIAL_DATA) return;
+        if (data === INITIAL_DATA || data.settings.vpnMode) return;
         // GUARD: Don't push or snapshot until we've confirmed Gist state via first pull
         if (!firstPullDoneRef.current && data.tasks.length === 0) return;
         saveSnapshot(data);
@@ -483,7 +483,7 @@ export default function App() {
             const d = dataRef.current;
             try { localStorage.setItem('sys_diag_cache', encryptData(d)); } catch(e) {}
             // Guard: never push empty data to Gist on unload
-            if (d.settings.gistId && d.settings.gistToken && d.tasks.length > 0 && firstPullDoneRef.current) {
+            if (d.settings.gistId && d.settings.gistToken && !d.settings.vpnMode && d.tasks.length > 0 && firstPullDoneRef.current) {
                 const safe = { ...d, settings: { ...d.settings, gistToken: "", gistId: "" } };
                 const blob = new Blob([JSON.stringify({ files: { 'sys_data.json': { content: JSON.stringify(safe, null, 2) } } })], { type: 'application/json' });
                 navigator.sendBeacon?.(`https://api.github.com/gists/${d.settings.gistId}`, blob);
@@ -1292,7 +1292,7 @@ export default function App() {
                         <h2 className={`text-base font-bold mb-4 flex items-center gap-2 ${textColor}`}><Icons.Settings size={18}/> {isVpnMode ? 'Settings' : 'Paramètres'}</h2>
                         <div className="space-y-3">
                             <div className={`p-2 rounded border text-xs font-mono break-all ${isVpnMode ? 'bg-gray-50 border-gray-200 text-gray-500' : 'bg-white/5 border-white/10 text-slate-400'}`}><span className={`font-bold ${isVpnMode ? 'text-gray-700' : 'text-white'}`}>SESSION</span> {SESSION_ID.substring(0,12)}</div>
-                            <label className="flex items-center justify-between"><span className={`text-xs ${mutedText}`}>{isVpnMode ? 'Light Theme' : 'Mode VPN'}</span><input type="checkbox" checked={data.settings.vpnMode} onChange={(e) => setSafeData(p => ({...p, settings: {...p.settings, vpnMode: e.target.checked}}))} /></label>
+                            <label className="flex items-center justify-between"><span className={`text-xs ${mutedText}`}>{isVpnMode ? 'Light Theme' : 'Mode VPN'}</span><input type="checkbox" checked={data.settings.vpnMode} onChange={(e) => { const goingOff = !e.target.checked && data.settings.vpnMode; setSafeData(p => ({...p, settings: {...p.settings, vpnMode: e.target.checked}})); if (goingOff && data.settings.gistToken && data.settings.gistId) { setTimeout(() => pullFromGist(), 500); } }} /></label>
                             {!isVpnMode && <label className="flex items-center justify-between"><span className={`text-xs ${mutedText}`}>Crise</span><input type="checkbox" checked={data.settings.crisisMode} onChange={(e) => setSafeData(p => ({...p, settings: {...p.settings, crisisMode: e.target.checked}}))} /></label>}
                             <label className="flex items-center justify-between"><span className={`text-xs ${mutedText}`}>Eye Care</span><input type="checkbox" checked={data.settings.eyeCare} onChange={(e) => setSafeData(p => ({...p, settings: {...p.settings, eyeCare: e.target.checked}}))} /></label>
 
