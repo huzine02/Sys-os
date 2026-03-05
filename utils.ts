@@ -44,10 +44,10 @@ export const INITIAL_DATA: AppData = {
         crisisMode: false,
         vpnMode: false, 
         eyeCare: true, 
-        // Récupération automatique depuis les variables d'environnement (.env)
+        // Récupération automatique depuis les variables Vite (baked dans le JS compilé)
         // Cela empêche la perte de connexion lors d'un crash ou d'un vide cache
-        gistToken: process.env.GIST_TOKEN || '', 
-        gistId: process.env.GIST_ID || '',
+        gistToken: import.meta.env.VITE_GIST_TOKEN || '',
+        gistId: import.meta.env.VITE_GIST_ID || '',
     },
     journal: [],
     review: { win: '', fail: '', priority: '' },

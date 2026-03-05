@@ -186,10 +186,12 @@ export default function App() {
             if (savedData) {
                 const parsed = decryptData(savedData);
                 if (parsed && parsed.settings) {
-                    // CRITICAL: tokens recovery chain: parsed > vault > empty
-                    // This survives data corruption, format migration, and process.env removal
-                    const token = parsed.settings.gistToken || vault?.t || '';
-                    const id = parsed.settings.gistId || vault?.i || '';
+                    // CRITICAL: tokens recovery chain: parsed > vault > env vars (baked in JS)
+                    // This survives localStorage wipe, data corruption, format migration
+                    const envToken = import.meta.env.VITE_GIST_TOKEN || '';
+                    const envId = import.meta.env.VITE_GIST_ID || '';
+                    const token = parsed.settings.gistToken || vault?.t || envToken;
+                    const id = parsed.settings.gistId || vault?.i || envId;
                     if (token && id) _saveTokenVault(token, id);
                     return { ...INITIAL_DATA, ...parsed, settings: { ...parsed.settings, gistToken: token, gistId: id }, weeklyConfig: parsed.weeklyConfig || DAY_CONFIGS };
                 }
@@ -198,8 +200,10 @@ export default function App() {
             if (vault) {
                 return { ...INITIAL_DATA, settings: { ...INITIAL_DATA.settings, gistToken: vault.t, gistId: vault.i } };
             }
+            // Ultimate fallback: env vars baked into JS bundle at build time
+            // This means even a complete localStorage wipe can't break the connection
         } catch (e) { console.error("[INIT] Error", e); }
-        return INITIAL_DATA;
+        return INITIAL_DATA; // INITIAL_DATA now uses import.meta.env as fallback
     });
 
     const [currentView, setCurrentView] = useState<ExtendedViewType>('dashboard');
