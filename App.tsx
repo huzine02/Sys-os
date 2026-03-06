@@ -179,6 +179,7 @@ export default function App() {
     const [data, setData] = useState<AppData>(() => {
         try {
             // Migration: try new key first, fallback to old key
+            console.log("[INIT] Starting data load...");
             let savedData = localStorage.getItem('sys_diag_cache');
             if (!savedData) {
                 savedData = localStorage.getItem('huzine_os_secure');
@@ -191,8 +192,10 @@ export default function App() {
             // Load token vault as safety net
             const vault = _loadTokenVault();
             const vpnLocked = _isVpnLocked();
+            console.log("[INIT] vpnLocked:", vpnLocked, "| savedData exists:", !!savedData);
             if (savedData) {
                 const parsed = decryptData(savedData);
+                console.log("[INIT] decryptData result:", parsed ? `${parsed.tasks?.length || 0} tasks, vpnMode=${parsed.settings?.vpnMode}` : "NULL/FAILED");
                 if (parsed && parsed.settings) {
                     // CRITICAL: env vars (baked in JS at build) ALWAYS win — they're the latest valid tokens
                     const envToken = import.meta.env.VITE_GIST_TOKEN || '';
@@ -202,6 +205,8 @@ export default function App() {
                     if (token && id) _saveTokenVault(token, id);
                     // VPN lock overrides parsed setting — prevents Gist pull from resetting VPN mode
                     const vpnMode = vpnLocked || parsed.settings.vpnMode || false;
+                    const vpnTasks = (parsed.tasks || []).filter((t: any) => t.vpnColumn);
+                    console.log("[INIT] LOADED:", parsed.tasks?.length, "tasks |", vpnTasks.length, "vpn tasks | vpnMode:", vpnMode);
                     return { ...INITIAL_DATA, ...parsed, settings: { ...parsed.settings, gistToken: token, gistId: id, vpnMode }, weeklyConfig: parsed.weeklyConfig || DAY_CONFIGS };
                 }
             }
@@ -487,12 +492,16 @@ export default function App() {
 
     // --- PUSH ON CHANGE (debounced) — guarded: no push until first pull confirms Gist state ---
     useEffect(() => {
-        if (data === INITIAL_DATA || data.settings.vpnMode) return;
-        // GUARD: Don't push or snapshot until we've confirmed Gist state via first pull
-        if (!firstPullDoneRef.current && data.tasks.length === 0) return;
-        saveSnapshot(data);
+        if (data === INITIAL_DATA) return;
+        // Always save local snapshots (even in VPN mode)
+        if (!firstPullDoneRef.current && data.tasks.length === 0) {
+            // Don't snapshot empty state before first pull
+        } else {
+            saveSnapshot(data);
+        }
+        // Gist push: blocked in VPN mode and before first pull
+        if (data.settings.vpnMode) return;
         if (data.settings.gistId && data.settings.gistToken && data.updatedBy === SESSION_ID) {
-            // Extra safety: never push empty data to Gist
             if (data.tasks.length === 0) { log("[PUSH] Blocked — 0 tasks, refusing to overwrite Gist."); return; }
             if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
             setSyncStatus('pending');
