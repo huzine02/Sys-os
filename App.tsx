@@ -186,19 +186,20 @@ export default function App() {
             if (savedData) {
                 const parsed = decryptData(savedData);
                 if (parsed && parsed.settings) {
-                    // CRITICAL: tokens recovery chain: parsed > vault > env vars (baked in JS)
-                    // This survives localStorage wipe, data corruption, format migration
+                    // CRITICAL: env vars (baked in JS at build) ALWAYS win — they're the latest valid tokens
                     const envToken = import.meta.env.VITE_GIST_TOKEN || '';
                     const envId = import.meta.env.VITE_GIST_ID || '';
-                    const token = parsed.settings.gistToken || vault?.t || envToken;
-                    const id = parsed.settings.gistId || vault?.i || envId;
+                    const token = envToken || parsed.settings.gistToken || vault?.t || '';
+                    const id = envId || parsed.settings.gistId || vault?.i || '';
                     if (token && id) _saveTokenVault(token, id);
                     return { ...INITIAL_DATA, ...parsed, settings: { ...parsed.settings, gistToken: token, gistId: id }, weeklyConfig: parsed.weeklyConfig || DAY_CONFIGS };
                 }
             }
-            // Even if main data is gone, vault can restore connection
-            if (vault) {
-                return { ...INITIAL_DATA, settings: { ...INITIAL_DATA.settings, gistToken: vault.t, gistId: vault.i } };
+            // Even if main data is gone, vault or env vars can restore connection
+            const fallbackToken = import.meta.env.VITE_GIST_TOKEN || vault?.t || '';
+            const fallbackId = import.meta.env.VITE_GIST_ID || vault?.i || '';
+            if (fallbackToken && fallbackId) {
+                return { ...INITIAL_DATA, settings: { ...INITIAL_DATA.settings, gistToken: fallbackToken, gistId: fallbackId } };
             }
             // Ultimate fallback: env vars baked into JS bundle at build time
             // This means even a complete localStorage wipe can't break the connection
