@@ -167,6 +167,13 @@ const _loadTokenVault = (): { t: string; i: string } | null => {
     } catch(e) {}
     return null;
 };
+// --- VPN LOCK: separate key so VPN mode survives any data reset/pull ---
+const _isVpnLocked = (): boolean => {
+    try { return localStorage.getItem('_sys_vpn') === '1'; } catch(e) { return false; }
+};
+const _setVpnLock = (on: boolean) => {
+    try { localStorage.setItem('_sys_vpn', on ? '1' : '0'); } catch(e) {}
+};
 
 export default function App() {
     const [data, setData] = useState<AppData>(() => {
@@ -183,6 +190,7 @@ export default function App() {
             }
             // Load token vault as safety net
             const vault = _loadTokenVault();
+            const vpnLocked = _isVpnLocked();
             if (savedData) {
                 const parsed = decryptData(savedData);
                 if (parsed && parsed.settings) {
@@ -192,7 +200,9 @@ export default function App() {
                     const token = envToken || parsed.settings.gistToken || vault?.t || '';
                     const id = envId || parsed.settings.gistId || vault?.i || '';
                     if (token && id) _saveTokenVault(token, id);
-                    return { ...INITIAL_DATA, ...parsed, settings: { ...parsed.settings, gistToken: token, gistId: id }, weeklyConfig: parsed.weeklyConfig || DAY_CONFIGS };
+                    // VPN lock overrides parsed setting — prevents Gist pull from resetting VPN mode
+                    const vpnMode = vpnLocked || parsed.settings.vpnMode || false;
+                    return { ...INITIAL_DATA, ...parsed, settings: { ...parsed.settings, gistToken: token, gistId: id, vpnMode }, weeklyConfig: parsed.weeklyConfig || DAY_CONFIGS };
                 }
             }
             // Even if main data is gone, vault or env vars can restore connection
@@ -408,7 +418,15 @@ export default function App() {
             if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA')) return;
             log("[PULL] Remote update applied.");
             setFlashSync(true); setTimeout(() => setFlashSync(false), 1000);
-            setData(prev => ({ ...prev, ...remote, weeklyConfig: remote.weeklyConfig || prev.weeklyConfig || DAY_CONFIGS, settings: { ...prev.settings, ...remote.settings, gistToken: c.settings.gistToken, gistId: c.settings.gistId } }));
+            setData(prev => {
+                // Preserve local VPN tasks (vpnColumn set) — they only exist locally
+                const localVpnTasks = prev.tasks.filter(t => t.vpnColumn);
+                const remoteNonVpnTasks = (remote.tasks || []);
+                // Merge: remote tasks + local VPN tasks (deduplicated by id)
+                const remoteIds = new Set(remoteNonVpnTasks.map(t => t.id));
+                const mergedTasks = [...remoteNonVpnTasks, ...localVpnTasks.filter(t => !remoteIds.has(t.id))];
+                return { ...prev, ...remote, tasks: mergedTasks, weeklyConfig: remote.weeklyConfig || prev.weeklyConfig || DAY_CONFIGS, settings: { ...prev.settings, ...remote.settings, gistToken: c.settings.gistToken, gistId: c.settings.gistId, vpnMode: prev.settings.vpnMode } };
+            });
             setSyncStatus('success');
         } catch (e: any) { log("[PULL] Err: " + e.message); }
     }, [SESSION_ID]);
@@ -1297,7 +1315,7 @@ export default function App() {
                         <h2 className={`text-base font-bold mb-4 flex items-center gap-2 ${textColor}`}><Icons.Settings size={18}/> {isVpnMode ? 'Settings' : 'Paramètres'}</h2>
                         <div className="space-y-3">
                             <div className={`p-2 rounded border text-xs font-mono break-all ${isVpnMode ? 'bg-gray-50 border-gray-200 text-gray-500' : 'bg-white/5 border-white/10 text-slate-400'}`}><span className={`font-bold ${isVpnMode ? 'text-gray-700' : 'text-white'}`}>SESSION</span> {SESSION_ID.substring(0,12)}</div>
-                            <label className="flex items-center justify-between"><span className={`text-xs ${mutedText}`}>{isVpnMode ? 'Light Theme' : 'Mode VPN'}</span><input type="checkbox" checked={data.settings.vpnMode} onChange={(e) => { const goingOff = !e.target.checked && data.settings.vpnMode; setSafeData(p => ({...p, settings: {...p.settings, vpnMode: e.target.checked}})); if (goingOff && data.settings.gistToken && data.settings.gistId) { setTimeout(() => pullFromGist(), 500); } }} /></label>
+                            <label className="flex items-center justify-between"><span className={`text-xs ${mutedText}`}>{isVpnMode ? 'Light Theme' : 'Mode VPN'}</span><input type="checkbox" checked={data.settings.vpnMode} onChange={(e) => { const newVpn = e.target.checked; const goingOff = !newVpn && data.settings.vpnMode; _setVpnLock(newVpn); setSafeData(p => ({...p, settings: {...p.settings, vpnMode: newVpn}})); if (goingOff && data.settings.gistToken && data.settings.gistId) { setTimeout(() => pullFromGist(), 500); } }} /></label>
                             {!isVpnMode && <label className="flex items-center justify-between"><span className={`text-xs ${mutedText}`}>Crise</span><input type="checkbox" checked={data.settings.crisisMode} onChange={(e) => setSafeData(p => ({...p, settings: {...p.settings, crisisMode: e.target.checked}}))} /></label>}
                             <label className="flex items-center justify-between"><span className={`text-xs ${mutedText}`}>Eye Care</span><input type="checkbox" checked={data.settings.eyeCare} onChange={(e) => setSafeData(p => ({...p, settings: {...p.settings, eyeCare: e.target.checked}}))} /></label>
 
