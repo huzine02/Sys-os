@@ -174,6 +174,9 @@ const _isVpnLocked = (): boolean => {
 const _setVpnLock = (on: boolean) => {
     try { localStorage.setItem('_sys_vpn', on ? '1' : '0'); } catch(e) {}
 };
+// Bootstrap flag: set at module level when localStorage decrypt fails during init.
+// Allows ONE Gist pull even in VPN mode to recover data, then cleared after first successful pull.
+let _bootstrapNeeded = false;
 
 export default function App() {
     const [data, setData] = useState<AppData>(() => {
@@ -209,12 +212,21 @@ export default function App() {
                     console.log("[INIT] LOADED:", parsed.tasks?.length, "tasks |", vpnTasks.length, "vpn tasks | vpnMode:", vpnMode);
                     return { ...INITIAL_DATA, ...parsed, settings: { ...parsed.settings, gistToken: token, gistId: id, vpnMode }, weeklyConfig: parsed.weeklyConfig || DAY_CONFIGS };
                 }
+                // decryptData failed — old cipher data is irrecoverable
+                // Clear corrupt data so next save starts fresh with new cipher
+                console.warn("[INIT] Clearing corrupt localStorage data. Will bootstrap from Gist.");
+                localStorage.removeItem('sys_diag_cache');
             }
             // Even if main data is gone, vault or env vars can restore connection
+            // IMPORTANT: mark bootstrap needed so pullFromGist runs even in VPN mode (ONE TIME)
             const fallbackToken = import.meta.env.VITE_GIST_TOKEN || vault?.t || '';
             const fallbackId = import.meta.env.VITE_GIST_ID || vault?.i || '';
             if (fallbackToken && fallbackId) {
-                return { ...INITIAL_DATA, settings: { ...INITIAL_DATA.settings, gistToken: fallbackToken, gistId: fallbackId } };
+                console.log("[INIT] Bootstrap mode — will pull from Gist once to recover data");
+                _bootstrapNeeded = true;
+                // Respect VPN lock in returned state, but _bootstrapNeeded will override the pull block
+                const vpnMode = vpnLocked;
+                return { ...INITIAL_DATA, settings: { ...INITIAL_DATA.settings, gistToken: fallbackToken, gistId: fallbackId, vpnMode } };
             }
             // Ultimate fallback: env vars baked into JS bundle at build time
             // This means even a complete localStorage wipe can't break the connection
@@ -408,19 +420,26 @@ export default function App() {
 
     const pullFromGist = useCallback(async () => {
         const c = dataRef.current;
-        if (!c.settings.gistToken || !c.settings.gistId || c.settings.vpnMode || document.hidden) return;
+        const isBootstrap = _bootstrapNeeded; // One-time recovery pull allowed even in VPN
+        if (!c.settings.gistToken || !c.settings.gistId || document.hidden) return;
+        if (c.settings.vpnMode && !isBootstrap) return; // VPN blocks pull UNLESS bootstrap needed
         try {
+            if (isBootstrap) console.log("[PULL] Bootstrap pull — recovering data from Gist (one-time, even in VPN)");
             const res = await fetch(`https://api.github.com/gists/${c.settings.gistId}?ts=${Date.now()}`, { headers: { 'Authorization': `token ${c.settings.gistToken}` }, cache: 'no-store' });
             if (!res.ok) return;
             const json = await res.json();
             const file = json.files['sys_data.json'] || json.files['huzine_db.json'];
             if (!file?.content) return;
             firstPullDoneRef.current = true; // Gist checked — safe to push from now on
+            if (isBootstrap) { _bootstrapNeeded = false; console.log("[PULL] Bootstrap complete — VPN lock now fully enforced"); }
             const remote = JSON.parse(file.content) as AppData;
-            if (remote.updatedBy === SESSION_ID) return;
-            if (remote.lastSynced <= (c.lastSynced || 0)) return;
-            const ae = document.activeElement;
-            if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA')) return;
+            if (!isBootstrap) {
+                // Normal pull: skip if we just pushed, or if no newer data, or if user is typing
+                if (remote.updatedBy === SESSION_ID) return;
+                if (remote.lastSynced <= (c.lastSynced || 0)) return;
+                const ae = document.activeElement;
+                if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA')) return;
+            }
             log("[PULL] Remote update applied.");
             setFlashSync(true); setTimeout(() => setFlashSync(false), 1000);
             setData(prev => {
@@ -484,8 +503,11 @@ export default function App() {
     // --- SYNC POLLING (5s) ---
     useEffect(() => {
         const { gistToken, gistId } = data.settings;
-        if (!gistToken || !gistId || data.settings.vpnMode) return;
-        pullFromGist();
+        if (!gistToken || !gistId) return;
+        // In VPN mode: only allow if bootstrap is needed (one-time recovery), then stop
+        if (data.settings.vpnMode && !_bootstrapNeeded) return;
+        pullFromGist(); // This will check _bootstrapNeeded internally and clear it
+        if (data.settings.vpnMode) return; // Don't set interval in VPN — bootstrap was the only pull
         const iv = setInterval(pullFromGist, 5000);
         return () => clearInterval(iv);
     }, [data.settings.gistId, data.settings.gistToken, data.settings.vpnMode, pullFromGist]);

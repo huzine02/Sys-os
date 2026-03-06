@@ -232,9 +232,11 @@ export const parseMarkdown = (text: string): string => {
 const _CK = [83,89,83,45,79,83,45,50,48,50,53,45,83,69,67]; // "SYS-OS-2025-SEC"
 
 const _xorCipher = (input: string, key: number[]): string => {
+    // Encode to UTF-8 bytes first to handle all Unicode chars safely
+    const utf8 = new TextEncoder().encode(input);
     const result: number[] = [];
-    for (let i = 0; i < input.length; i++) {
-        result.push(input.charCodeAt(i) ^ key[i % key.length]);
+    for (let i = 0; i < utf8.length; i++) {
+        result.push(utf8[i] ^ key[i % key.length]);
     }
     return result.map(c => c.toString(16).padStart(2, '0')).join('');
 };
@@ -244,7 +246,11 @@ const _xorDecipher = (hex: string, key: number[]): string => {
     for (let i = 0; i < hex.length; i += 2) {
         bytes.push(parseInt(hex.substring(i, i + 2), 16));
     }
-    return bytes.map((b, i) => String.fromCharCode(b ^ key[i % key.length])).join('');
+    const decoded = new Uint8Array(bytes.length);
+    for (let i = 0; i < bytes.length; i++) {
+        decoded[i] = bytes[i] ^ key[i % key.length];
+    }
+    return new TextDecoder().decode(decoded);
 };
 
 export const encryptData = (data: AppData): string => {
@@ -260,10 +266,27 @@ export const encryptData = (data: AppData): string => {
 export const decryptData = (encrypted: string): AppData | null => {
     if (!encrypted) return null;
     try {
-        // New format: x1:hex
+        // New format: x1:hex (TextEncoder-based, correct for all Unicode)
         if (encrypted.startsWith('x1:')) {
-            const json = _xorDecipher(encrypted.substring(3), _CK);
-            return JSON.parse(json);
+            try {
+                const json = _xorDecipher(encrypted.substring(3), _CK);
+                return JSON.parse(json);
+            } catch (_e1) {
+                // Fallback: try legacy x1 decipher (charCode-based, broken for non-ASCII but works for ASCII-only JSON)
+                try {
+                    const hex = encrypted.substring(3);
+                    const chars: string[] = [];
+                    for (let i = 0; i < hex.length; i += 2) {
+                        chars.push(String.fromCharCode(parseInt(hex.substring(i, i + 2), 16) ^ _CK[(i / 2) % _CK.length]));
+                    }
+                    const json = chars.join('');
+                    return JSON.parse(json);
+                } catch (_e2) {
+                    // Old cipher data with non-ASCII chars is irrecoverable — will need Gist re-pull
+                    console.warn("[DECRYPT] x1: data irrecoverable (legacy cipher + non-ASCII). Will bootstrap from Gist.");
+                    return null;
+                }
+            }
         }
         // Legacy format 1: base64
         const json = decodeURIComponent(escape(atob(encrypted)));
